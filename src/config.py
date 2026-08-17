@@ -46,3 +46,12 @@ TEMPORAL_KEYWORDS = [
     "truoc", "sau", "tiep theo", "trong khi", "sau do", "roi",
     "trước", "tiếp theo", "sau đó", "rồi",
 ]
+
+# VQA Pipeline Config (Improvements #3, #5, #7, #8, #9, #11, #12)
+VQA_CANDIDATES = 30                # FAISS candidates per query before RRF
+VQA_RERANK_K = 5                   # Top-K candidates passed to VLM for answer
+VQA_PARAPHRASE_N = 2               # Number of paraphrases for RRF
+VQA_VERIFICATION_BOOST = 0.15      # Score boost for VLM-verified frames (Improvement #5)
+VQA_RRF_K = 60                     # RRF constant k
+SEMANTIC_OBJ_THRESHOLD = 0.55      # MiniLM cosine similarity threshold (Improvement #9)
+SEMANTIC_OBJ_TOP_K = 3             # Top-K OpenImages labels per noun phrase
