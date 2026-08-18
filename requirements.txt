@@ -1,0 +1,36 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# --- ML & Transformers ---
+# Core
+numpy>=1.26.0
+scipy>=1.11.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+polars>=0.20.0
+tqdm>=4.66.0
+faiss-cpu>=1.8.0
+open_clip_torch>=2.24.0
+streamlit>=1.31.0
+fastapi>=0.109.0 
+uvicorn>=0.27.0
+requests
+python-dotenv
+deep-translator>=1.11.4
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Model Serving (Linux/CUDA/Colab)
+# Qwen2-VL is intentionally kept below the next major Transformers release.
+transformers>=4.45.0,<5.0.0
+accelerate>=0.34.0
+sentencepiece
+bitsandbytes>=0.46.1
+
+# Development / validation
+pytest>=8.0.0
+
+# Optional VQA enhancements (the code falls back when these are absent):
+# duckduckgo-search
+# spacy
+# sentence-transformers
+# After installing spaCy, optionally download: python -m spacy download en_core_web_sm
