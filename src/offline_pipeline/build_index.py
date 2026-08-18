@@ -21,24 +21,28 @@ class FAISSIndexBuilder:
 
             
         metadata_df = pl.read_parquet(self.config.METADATA_PATH)
-        video_ids = metadata_df["video_id"].unique().to_list()
-        video_ids.sort()
+        video_ids = sorted(metadata_df["video_id"].unique().to_list())
 
         print(f"Building FAISS Index for {len(video_ids)} metadata")
         
         self.index = faiss.IndexFlatIP(self.config.CLIP_DIM)
         total_vectors = 0
         
+        expected_total = metadata_df.height
         for vid in video_ids:
             npy_path = self.config.CLIP_FEATURES_DIR / f"{vid}.npy"
             if not npy_path.exists():
-                print(f"Warning: {npy_path.name} not found. Skipped.")
-                continue
+                raise FileNotFoundError(f"Missing CLIP feature file: {npy_path}")
                 
             features = np.load(npy_path)
             if len(features.shape) == 1:
                 features = features.reshape(1, -1)
             features = features.astype('float32')
+            expected_rows = metadata_df.filter(pl.col("video_id") == vid).height
+            if features.shape != (expected_rows, self.config.CLIP_DIM):
+                raise ValueError(
+                    f"{npy_path.name}: expected {(expected_rows, self.config.CLIP_DIM)}, got {features.shape}"
+                )
             
             faiss.normalize_L2(features)
             self.index.add(features)
@@ -46,6 +50,8 @@ class FAISSIndexBuilder:
             total_vectors += features.shape[0]
             
         print(f"FAISS Index built successfully with {total_vectors} vectors.")
+        if total_vectors != expected_total:
+            raise ValueError(f"Built {total_vectors} vectors for {expected_total} metadata rows")
         return True
         
     def save(self):

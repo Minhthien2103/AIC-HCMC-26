@@ -1,71 +1,67 @@
 import sys
 from pathlib import Path
-from deep_translator import GoogleTranslator
+
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from src.online_pipeline.sequence_alignment import align_event_candidates
+from src.utils.translation import translate_vi_to_en
+
 
 class TrakeTask:
-    def __init__(self, encoder, retriever, vlm_pipeline = None):
+    """Retrieve complete chronological event sequences for TRAKE."""
+
+    def __init__(self, encoder, retriever, vlm_pipeline=None):
         self.encoder = encoder
         self.retriever = retriever
         self.vlm_pipeline = vlm_pipeline
-        
-    def execute(self, video_desc: str, events: list[str], top_videos: int = 5) -> list[dict]:
-        try:
-            eng_video_desc = GoogleTranslator(source='vi', target='en').translate(video_desc)
-        except Exception:
-            eng_video_desc = video_desc
-            
+
+    @staticmethod
+    def _translate(text: str) -> str:
+        return translate_vi_to_en(text)
+
+    def execute(
+        self,
+        video_desc: str,
+        events: list[str] | tuple[str, ...],
+        top_videos: int = 5,
+        event_top_k: int = 20,
+        max_sequences: int = 100,
+        beam_size: int = 50,
+    ) -> list[dict]:
+        eng_video_desc = self._translate(video_desc)
+        events = [str(event).strip() for event in events if str(event).strip()]
         auto_extracted = False
         if not events and self.vlm_pipeline:
-            # Auto-extract events from description using VLM
-            events = self.vlm_pipeline.extract_events(video_desc)
+            events = [event.strip() for event in self.vlm_pipeline.extract_events(video_desc) if event.strip()]
             auto_extracted = True
-            
-        # Phase A: Find target videos
+        if not events:
+            return []
+
         vector = self.encoder.encode_text(eng_video_desc)
-        wide_candidates = self.retriever.search(vector, top_k=500)
-        
-        video_scores = {}
-        for c in wide_candidates:
-            vid = c["video_id"]
-            if vid not in video_scores or c["score"] > video_scores[vid]["score"]:
-                video_scores[vid] = c
-                
-        sorted_videos = sorted(video_scores.values(), key=lambda x: x["score"], reverse=True)[:top_videos]
-        
-        results = []
-        # Phase B: Find events within target videos
-        for vid_candidate in sorted_videos:
-            vid = vid_candidate["video_id"]
-            vid_events = []
-            
-            for event_desc in events:
-                if not event_desc.strip():
-                    continue
-                try:
-                    eng_event = GoogleTranslator(source='vi', target='en').translate(event_desc)
-                except Exception:
-                    eng_event = event_desc
-                    
-                e_vec = self.encoder.encode_text(eng_event)
-                e_cands = self.retriever.search_in_video(e_vec, video_id=vid, top_k=1)
-                if e_cands:
-                    vid_events.append(e_cands[0])
-                    
-            # Basic temporal constraint verification
-            valid_sequence = True
-            for i in range(len(vid_events) - 1):
-                if vid_events[i]["frame_id"] >= vid_events[i+1]["frame_id"]:
-                    valid_sequence = False
-                    break
-                    
-            results.append({
-                "video_id": vid,
-                "video_score": vid_candidate["score"],
-                "events": vid_events,
-                "is_valid_sequence": valid_sequence,
-                "auto_extracted_events": events if auto_extracted else None
-            })
-            
-        return results
+        wide_candidates = self.retriever.search(vector, top_k=max(100, top_videos * 100))
+        video_scores: dict[str, float] = {}
+        for candidate in wide_candidates:
+            vid = candidate["video_id"]
+            video_scores[vid] = max(video_scores.get(vid, float("-inf")), float(candidate["score"]))
+        sorted_videos = sorted(video_scores, key=video_scores.get, reverse=True)[:top_videos]
+
+        results: list[dict] = []
+        event_vectors = [self.encoder.encode_text(self._translate(event)) for event in events]
+        for vid in sorted_videos:
+            event_lists = [
+                self.retriever.search_in_video(vector, video_id=vid, top_k=event_top_k)
+                for vector in event_vectors
+            ]
+            chains = align_event_candidates(event_lists, beam_size=beam_size, max_sequences=max_sequences)
+            for chain in chains:
+                results.append({
+                    "video_id": vid,
+                    "video_score": video_scores[vid],
+                    "sequence_score": chain["sequence_score"] + video_scores[vid],
+                    "events": chain["events"],
+                    "is_valid_sequence": len(chain["events"]) == len(events),
+                    "auto_extracted_events": events if auto_extracted else None,
+                })
+
+        results.sort(key=lambda result: result["sequence_score"], reverse=True)
+        return results[:max_sequences]

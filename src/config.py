@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -55,3 +54,12 @@ VQA_VERIFICATION_BOOST = 0.15      # Score boost for VLM-verified frames (Improv
 VQA_RRF_K = 60                     # RRF constant k
 SEMANTIC_OBJ_THRESHOLD = 0.55      # MiniLM cosine similarity threshold (Improvement #9)
 SEMANTIC_OBJ_TOP_K = 3             # Top-K OpenImages labels per noun phrase
+VQA_MAX_ANSWER_CHARS = 100
+VQA_ENABLE_EXTERNAL_SEARCH = False
+VQA_MAX_CANDIDATES = 100
+VQA_VERIFY_CANDIDATES = True
+
+
+def keyframe_path(video_id: str, keyframe_name: str) -> Path:
+    """Resolve a keyframe against the current checkout, never stale Parquet paths."""
+    return KEYFRAMES_DIR / str(video_id) / f"{str(keyframe_name).removesuffix('.jpg')}.jpg"

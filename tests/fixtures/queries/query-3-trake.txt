@@ -1,0 +1,4 @@
+A person crosses a room
+Events:
+Starts walking
+Reaches the door

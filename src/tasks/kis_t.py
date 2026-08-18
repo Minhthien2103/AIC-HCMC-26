@@ -1,10 +1,10 @@
 import sys
 from pathlib import Path
 import re
-from deep_translator import GoogleTranslator
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.online_pipeline.temporal_search import TemporalSearchEngine
+from src.utils.translation import translate_vi_to_en
 
 class KIStask:
     def __init__(self, encoder, retriever, object_filter = None):
@@ -14,13 +14,9 @@ class KIStask:
         self.temporal_engine = TemporalSearchEngine(encoder, retriever, object_filter)
         
     def execute(self, query: str, top_k: int = 100, object_labels: str = "") -> list[dict]:
-        try:
-            english_query = GoogleTranslator(source = 'vi', target = 'en').translate(query)
+        english_query = translate_vi_to_en(query)
+        if english_query != query:
             print(f"Translated query: {english_query}")
-
-        except Exception as e:
-            print(f"Translation failed: {e}")
-            english_query = query
             
         vector = self.encoder.encode_text(english_query)
 

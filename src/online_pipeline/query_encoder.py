@@ -44,7 +44,7 @@ class QueryEncoder():
 
     def encode_text(self, query: str) -> np.ndarray:
         if self.model is None or self.tokenizer is None:
-            print(f"    Model/Tokenizer is None")
+            print("    Model/Tokenizer is None")
             return np.zeros(512)
 
         tokens = self.tokenizer([query]).to(self.device)
@@ -60,7 +60,7 @@ class QueryEncoder():
 
     def encode_image(self, image_input) -> np.ndarray:
         if self.model is None or self.tokenizer is None:
-            print(f"    Model/Tokenizer is None")
+            print("    Model/Tokenizer is None")
             return np.zeros(512)
 
         img_tensor = self.preprocess(image_input).unsqueeze(0).to(self.device)

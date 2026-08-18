@@ -24,7 +24,7 @@ class ScoreFuser:
                     scores_map[f_idx] = 0.0
                     item_map[f_idx] = item
 
-            scores_map[f_idx] += 1.0 / (self.k + rank + 1)
+                scores_map[f_idx] += 1.0 / (self.k + rank + 1)
 
         fused_results = []
 
@@ -37,4 +37,3 @@ class ScoreFuser:
         fused_results.sort(key = lambda x: x["score"], reverse = True)
 
         return fused_results
-        
