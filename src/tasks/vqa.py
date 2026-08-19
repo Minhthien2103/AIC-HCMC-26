@@ -74,6 +74,8 @@ class VQATask:
 
         retrieval_desc = str(analysis.get("retrieval_description") or english_question)
         vlm_question = str(analysis.get("vlm_question") or question)
+        detected_lang = "vi" if question != english_question else "en"
+
         paraphrases = [str(value) for value in (analysis.get("paraphrases") or []) if str(value).strip()]
         paraphrases = paraphrases[: config.VQA_PARAPHRASE_N]
         objects_req = [str(value) for value in (analysis.get("objects_required") or []) if str(value).strip()]
@@ -139,6 +141,7 @@ class VQATask:
                     candidate["answer"] = self.vlm_pipeline.answer_question(
                         str(config.keyframe_path(candidate["video_id"], candidate["keyframe_name"])),
                         vlm_question,
+                        lang=detected_lang,
                     )
                 except Exception as exc:
                     candidate["answer"] = ""

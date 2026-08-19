@@ -217,7 +217,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-files/info/
-files/resources/
+files/
 data/
 indexes/

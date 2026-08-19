@@ -20,9 +20,8 @@ class VLMPipeline:
     def load(self) -> None:
         if self.model is not None:
             return
-        if self.device != "cuda" or not torch.cuda.is_available():
-            raise RuntimeError("Qwen2-VL 4-bit inference requires a Linux/CUDA runtime (use Colab GPU).")
-
+        if not torch.cuda.is_available():
+            raise RuntimeError("Qwen2-VL 4-bit inference requires a CUDA-capable GPU.")
         try:
             bnb_version = version("bitsandbytes")
         except PackageNotFoundError as exc:
@@ -43,6 +42,7 @@ class VLMPipeline:
             self.model_name,
             quantization_config=quant_config,
             device_map="auto",
+            max_memory={0: "12GB", "cpu": "24GB"},
             torch_dtype=torch.float16,
             attn_implementation="sdpa",
         )
@@ -83,22 +83,25 @@ class VLMPipeline:
             clean_up_tokenization_spaces=False,
         )[0].strip()
 
-    def answer_question(self, image_path: str, question: str) -> str:
+    def answer_question(self, image_path: str, question: str, lang: str = "vi") -> str:
         image = Image.open(image_path).convert("RGB")
+        lang_instruction = "Answer in Vietnamese." if lang == "vi" else "Answer in English."
         messages = [{
             "role": "user",
             "content": [
                 {"type": "image"},
                 {"type": "text", "text": (
-                    f"{question}\n\n"
-                    "Answer using only clearly visible information. Return only the answer, with no Markdown, "
-                    "no explanation, and no more than 100 characters. If the requested detail is not visible, "
-                    "say that it is not visible. Do not guess."
+                    f"Question: {question}\n\n"
+                    f"{lang_instruction} "
+                    "Answer concisely based ONLY on what is clearly visible in the image. "
+                    "Make sure to answer ALL parts of the question (e.g. if asked about an object AND glasses, answer BOTH). "
+                    "Be specific: name the exact object, color, brand if readable. "
+                    "If something is not visible or unclear, say 'not visible'. "
+                    "Do not guess. Max 80 characters."
                 )},
             ],
         }]
-        return self._generate_text(self._prepare(messages, image), max_new_tokens=48)
-
+        return self._generate_text(self._prepare(messages, image), max_new_tokens=64)
     def extract_events(self, video_desc: str) -> list[str]:
         messages = [{
             "role": "user",
@@ -116,9 +119,18 @@ class VLMPipeline:
 
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (
-            "Analyze the question and output ONLY valid JSON with keys "
-            "retrieval_description, vlm_question, paraphrases, objects_required, "
-            "needs_fact_lookup, fact_query. Do not invent facts.\n"
+            "You are a video retrieval assistant. Analyze the question and output ONLY valid JSON with these keys:\n"
+            "  retrieval_description: Scene description for CLIP image search. ONLY include KNOWN FACTS from the question. OMIT any unknown details the user is asking about (e.g. if asked 'is he wearing glasses?', DO NOT put glasses here). OMIT clothing/background colors. Focus on core ACTIONS and OBJECTS.\n"
+            "  subject_description: Short description of the PERSON only (role, clothing color, accessories) for verification.\n"
+            "  vlm_question: A direct factual question to ask the VLM. MUST include ALL questions/unknowns from the user. Write in the SAME LANGUAGE as the input question. (e.g. if input is 'đang cầm gì và có đeo kính không?', this must be 'Người đó đang cầm gì và có đeo kính không?').\n"
+            "  paraphrases: 2 alternative retrieval_description strings using different wording.\n"
+            "  objects_required: List of physical objects that must appear in the frame.\n"
+            "  needs_fact_lookup: false\n"
+            "  fact_query: \"\"\n"
+            "EXAMPLES:\n"
+            "Q: 1 người dẫn truyền hình nam, mặc áo xanh, đang cầm gì và có đeo kính không?\n"
+            "A: {\"retrieval_description\": \"A male TV presenter holding an object.\", \"subject_description\": \"Male TV presenter wearing a blue shirt.\", \"vlm_question\": \"Người đó đang cầm cái gì trên tay và có đeo kính không?\"}\n"
+            "IMPORTANT: retrieval_description must NOT mention clothing colors or background colors. MUST omit unknowns.\n"
             f"Question: {english_question}"
         )
         raw = self._text_only_generate(prompt, max_new_tokens=256)
@@ -143,7 +155,7 @@ class VLMPipeline:
         messages = [{
             "role": "user",
             "content": [{"type": "image"}, {"type": "text", "text": (
-                f"Does this image match the description: {retrieval_description}? Answer ONLY yes or no."
+                f"Is there a person who appears to be a TV presenter, news anchor, or public speaker in this image? Answer ONLY yes or no."
             )}],
         }]
         try:
