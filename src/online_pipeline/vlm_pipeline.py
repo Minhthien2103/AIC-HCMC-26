@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
 import torch
 from PIL import Image
@@ -113,6 +114,80 @@ class VLMPipeline:
     def _text_only_generate(self, prompt: str, max_new_tokens: int = 512) -> str:
         messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
         return self._generate_text(self._prepare(messages), max_new_tokens=max_new_tokens)
+
+    @staticmethod
+    def _json_object(raw: str) -> dict[str, Any] | None:
+        match = re.search(r"\{.*?\}", raw, re.DOTALL)
+        if not match:
+            return None
+        try:
+            value = json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return list(dict.fromkeys(
+            text for text in (str(item).strip() for item in value) if text
+        ))
+
+    def analyze_kis_query(self, english_query: str) -> dict[str, list[str]]:
+        """Produce additive visual retrieval hints without replacing the query."""
+        prompt = (
+            "You are preparing a visual known-item video search. Return ONLY valid JSON with "
+            "keys retrieval_queries, must_have, expansions. All values are arrays of concise English strings. "
+            "retrieval_queries must restate visible scenes or actions from the description. must_have must contain "
+            "only visible attributes that distinguish the target. expansions may contain a synonym or a fact "
+            "reliably implied by the description, but never invent an event. Do not omit the original constraints.\n"
+            f"Description: {english_query}"
+        )
+        raw = self._text_only_generate(prompt, max_new_tokens=256)
+        parsed = self._json_object(raw)
+        if parsed is None:
+            raise ValueError(f"KIS query analysis is not valid JSON: {raw[:200]}")
+        return {
+            "retrieval_queries": self._string_list(parsed.get("retrieval_queries")),
+            "must_have": self._string_list(parsed.get("must_have")),
+            "expansions": self._string_list(parsed.get("expansions")),
+        }
+
+    def score_kis_match(
+        self,
+        image_path: str,
+        original_query: str,
+        must_have: list[str],
+    ) -> int | None:
+        """Return a conservative 0--3 visual match score, or None on failure."""
+        criteria = "\n".join(f"- {item}" for item in must_have) or "- Use the original description."
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    "Score how well this image matches the visual known-item search below. "
+                    "Return ONLY valid JSON exactly like {\"score\": 0}. "
+                    "Use 0 for unrelated/contradicted, 1 for only broad context, 2 for most visible "
+                    "requirements, and 3 for all visible requirements. Do not infer details that cannot "
+                    "be seen in the image.\n"
+                    f"Original description: {original_query}\n"
+                    f"Visible requirements:\n{criteria}"
+                )},
+            ],
+        }]
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=32))
+            if parsed is None or isinstance(parsed.get("score"), bool):
+                return None
+            score = int(parsed["score"])
+            return score if 0 <= score <= 3 else None
+        except Exception as exc:
+            print(f"[KIS] Qwen visual re-rank skipped for {image_path}: {exc}")
+            return None
 
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (

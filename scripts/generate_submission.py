@@ -43,6 +43,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--vqa-top-k", type=int, default=100)
     parser.add_argument("--trake-top-k", type=int, default=100)
     parser.add_argument("--trake-top-videos", type=int, default=10)
+    parser.add_argument(
+        "--disable-kis-qwen",
+        action="store_true",
+        help="Disable Qwen2-VL KIS query analysis and visual re-ranking.",
+    )
+    parser.add_argument(
+        "--kis-vlm-top-k",
+        type=int,
+        default=config.KIS_VLM_TOP_K,
+        help="Maximum KIS candidates visually scored by Qwen2-VL (1-100).",
+    )
     parser.add_argument("--allow-external-search", action="store_true")
     return parser.parse_args()
 
@@ -58,7 +69,7 @@ def _dedupe_rows(rows: list[list[object]]) -> list[list[object]]:
     return unique
 
 
-def _build_tasks(args: argparse.Namespace):
+def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
     repo_root = args.repo_root.resolve()
     if not (repo_root / "src" / "config.py").exists():
         raise FileNotFoundError(f"Invalid --repo-root: {repo_root}")
@@ -80,19 +91,45 @@ def _build_tasks(args: argparse.Namespace):
     if retriever.index is None or retriever.meta_df is None:
         raise RuntimeError("FAISS index and metadata are required before generating a submission")
     object_filter = ObjectFilter(config.OBJECTS_PATH)
-    vlm = VLMPipeline(device=args.device)
-    kis = KIStask(encoder, retriever, object_filter=object_filter)
-    trake = TrakeTask(encoder, retriever, vlm_pipeline=vlm)
-    # SemanticObjectFilter is optional and lazy; the VQA task falls back to
-    # exact labels when spaCy/SentenceTransformers are not installed.
-    semantic_filter = None
-    try:
-        from src.online_pipeline.semantic_object_filter import SemanticObjectFilter
 
-        semantic_filter = SemanticObjectFilter(object_filter.get_all_labels())
-    except Exception as exc:
-        LOGGER.warning("Semantic object filter disabled: %s", exc)
-    vqa = VQATask(encoder, retriever, object_filter=object_filter, vlm_pipeline=vlm, semantic_filter=semantic_filter)
+    needs_vqa = any(spec.query_type == "qa" for spec in specs)
+    needs_trake = any(spec.query_type == "trake" for spec in specs)
+    kis_qwen_enabled = not args.disable_kis_qwen and args.device == "cuda"
+    if not args.disable_kis_qwen and args.device != "cuda":
+        LOGGER.warning("KIS Qwen is disabled because --device=%s is not CUDA", args.device)
+
+    # This object is lazy: Qwen weights load only if a VQA/TRAKE/KIS visual
+    # operation actually needs them. A KIS-only CPU run therefore remains CLIP
+    # only, while a CUDA KIS run reuses the same loaded 4-bit Qwen instance.
+    vlm = VLMPipeline(device=args.device) if (kis_qwen_enabled or needs_vqa or needs_trake) else None
+    kis = KIStask(
+        encoder,
+        retriever,
+        object_filter=object_filter,
+        vlm_pipeline=vlm,
+        enable_qwen=kis_qwen_enabled,
+        vlm_top_k=args.kis_vlm_top_k,
+    )
+    trake = TrakeTask(encoder, retriever, vlm_pipeline=vlm) if needs_trake else None
+
+    vqa = None
+    if needs_vqa:
+        # SemanticObjectFilter is optional and lazy; the VQA task falls back to
+        # exact labels when spaCy/SentenceTransformers are not installed.
+        semantic_filter = None
+        try:
+            from src.online_pipeline.semantic_object_filter import SemanticObjectFilter
+
+            semantic_filter = SemanticObjectFilter(object_filter.get_all_labels())
+        except Exception as exc:
+            LOGGER.warning("Semantic object filter disabled: %s", exc)
+        vqa = VQATask(
+            encoder,
+            retriever,
+            object_filter=object_filter,
+            vlm_pipeline=vlm,
+            semantic_filter=semantic_filter,
+        )
     return kis, vqa, trake
 
 
@@ -108,6 +145,8 @@ def _generate_for_query(spec: QuerySpec, tasks, args: argparse.Namespace) -> lis
                 LOGGER.warning("Skipping KIS candidate for %s: %s", spec.query_id, exc)
         return _dedupe_rows(rows)[: args.max_rows]
     if spec.query_type == "qa":
+        if vqa is None:
+            raise RuntimeError("VQA task was not initialized")
         results, _analysis = vqa.execute(
             spec.question or spec.description,
             top_k=min(args.vqa_top_k, args.max_rows),
@@ -121,6 +160,8 @@ def _generate_for_query(spec: QuerySpec, tasks, args: argparse.Namespace) -> lis
                 LOGGER.warning("Skipping VQA candidate for %s: %s", spec.query_id, exc)
         return _dedupe_rows(rows)[: args.max_rows]
 
+    if trake is None:
+        raise RuntimeError("TRAKE task was not initialized")
     results = trake.execute(
         spec.description,
         list(spec.events),
@@ -142,9 +183,11 @@ def main() -> int:
         raise SystemExit("--max-rows must be between 1 and 100")
     if not 1 <= args.vqa_top_k <= 100 or not 1 <= args.trake_top_k <= 100:
         raise SystemExit("--vqa-top-k and --trake-top-k must be between 1 and 100")
+    if not 1 <= args.kis_vlm_top_k <= 100:
+        raise SystemExit("--kis-vlm-top-k must be between 1 and 100")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     specs = load_query_specs(args.queries_dir, args.manifest)
-    tasks = _build_tasks(args)
+    tasks = _build_tasks(args, specs)
     with tempfile.TemporaryDirectory(prefix="aic2026-submission-") as temp_dir:
         submission_dir = Path(temp_dir) / "submission"
         for spec in specs:

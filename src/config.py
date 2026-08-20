@@ -28,7 +28,10 @@ OPTICAL_FLOW_THRESHOLD = 5.0    # Threshold for global motion filter to suppress
 EMBEDDING_BATCH_SIZE = 32
 
 # ── CLIP model (MUST match the model used to create the .npy features) ────────
-CLIP_MODEL_NAME = "ViT-B-32"
+# OpenCLIP's ``openai`` checkpoint was trained with QuickGELU.  The plain
+# ViT-B-32 architecture defaults to GELU and emits a mismatch warning; use the
+# architecture alias that preserves the checkpoint's embedding space.
+CLIP_MODEL_NAME = "ViT-B-32-quickgelu"
 CLIP_PRETRAINED = "openai"
 CLIP_DIM = 512
 
@@ -37,6 +40,14 @@ DEFAULT_TOP_K = 100
 OBJECT_CONF_THRESH = 0.3
 CLIP_WEIGHT = 0.7
 OBJECT_BOOST_WEIGHT = 0.3
+
+# ── KIS GPU retrieval / re-ranking ─────────────────────────────────────────
+# These values are intentionally configurable rather than hidden inside the
+# task implementation, so trial submissions can be reproduced and ablated.
+KIS_CANDIDATES_PER_VARIANT = 600
+KIS_RRF_K = 60
+KIS_VLM_TOP_K = 50
+KIS_VLM_PROMOTE_MIN_SCORE = 2
 
 # ── Temporal search ───────────────────────────────────────────────────────────
 TEMPORAL_WINDOW = 20
