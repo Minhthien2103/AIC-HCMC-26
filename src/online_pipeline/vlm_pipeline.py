@@ -151,6 +151,27 @@ class VLMPipeline:
             "objects_required": [],
         }
 
+    def read_text_in_image(self, image_path: str, question: str, lang: str = "vi") -> str:
+        """OCR-mode: ask VLM to read and transcribe visible text relevant to the question.
+        Temporary fallback until DeepSolo+PARSeq OcrIndex is available.
+        """
+        from PIL import Image
+        image = Image.open(image_path).convert("RGB")
+        lang_out = "Vietnamese" if lang == "vi" else "English"
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Question: {question}\n"
+                    "First, accurately transcribe ALL text visible in this image, paying attention to banners, signs, and posters. "
+                    f"Then, use the transcribed text to answer the question concisely in {lang_out}. "
+                    "If no relevant text is visible, output ONLY: not visible."
+                )},
+            ],
+        }]
+        return self._generate_text(self._prepare(messages, image), max_new_tokens=128)
+
     def verify_frame(self, image_path: str, retrieval_description: str) -> bool:
         messages = [{
             "role": "user",

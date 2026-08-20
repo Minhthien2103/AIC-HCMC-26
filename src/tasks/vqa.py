@@ -27,7 +27,7 @@ def _rrf_fusion(ranked_lists: list, k: int = None) -> list:
 def _external_search(query: str) -> str:
     """Best-effort optional lookup; never required for a reproducible run."""
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
 
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=3))
@@ -75,6 +75,19 @@ class VQATask:
         retrieval_desc = str(analysis.get("retrieval_description") or english_question)
         vlm_question = str(analysis.get("vlm_question") or question)
         detected_lang = "vi" if question != english_question else "en"
+
+        # OCR intent detection: question asks to READ visible text
+        _ocr_keywords = [
+            "ten la gi", "ten gi", "cau tho", "tieu de", "ghi gi", "doc duoc",
+            "noi dung", "ten chuong trinh", "ten mon an", "ten xa", "ten huyen",
+            "what is written", "what does it say", "what text", "read the",
+        ]
+        import unicodedata
+        _q_normalized = unicodedata.normalize("NFD", vlm_question.lower())
+        _q_ascii = "".join(c for c in _q_normalized if unicodedata.category(c) != "Mn")
+        is_ocr_query = any(kw in _q_ascii for kw in _ocr_keywords)
+        if is_ocr_query:
+            print(f"[VQA] OCR-mode detected for: {vlm_question[:60]}")
 
         paraphrases = [str(value) for value in (analysis.get("paraphrases") or []) if str(value).strip()]
         paraphrases = paraphrases[: config.VQA_PARAPHRASE_N]
@@ -138,11 +151,15 @@ class VQATask:
             candidate["answer_error"] = ""
             if self.vlm_pipeline:
                 try:
-                    candidate["answer"] = self.vlm_pipeline.answer_question(
-                        str(config.keyframe_path(candidate["video_id"], candidate["keyframe_name"])),
-                        vlm_question,
-                        lang=detected_lang,
-                    )
+                    frame_path = str(config.keyframe_path(candidate["video_id"], candidate["keyframe_name"]))
+                    if is_ocr_query and hasattr(self.vlm_pipeline, "read_text_in_image"):
+                        candidate["answer"] = self.vlm_pipeline.read_text_in_image(
+                            frame_path, vlm_question, lang=detected_lang,
+                        )
+                    else:
+                        candidate["answer"] = self.vlm_pipeline.answer_question(
+                            frame_path, vlm_question, lang=detected_lang,
+                        )
                 except Exception as exc:
                     candidate["answer"] = ""
                     candidate["answer_error"] = str(exc)
