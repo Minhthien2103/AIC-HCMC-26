@@ -221,3 +221,20 @@ files/info/
 files/resources/
 data/
 indexes/
+
+# macOS Finder metadata
+.DS_Store
+
+# Local competition assets (provided test queries, manifests, and large indexes)
+query/
+indexes.zip
+
+# Generated retrieval/submission artifacts
+outputs/
+result/
+submission/
+
+# Personal working notes and locally generated documentation
+CheckList.md
+Thongtin.md
+docs/
