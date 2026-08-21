@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src import config
+from src.online_pipeline.sequence_alignment import align_event_candidates
 
 class TemporalSearchEngine:
     def __init__(self, encoder, retriever, object_filter=None):
@@ -54,38 +55,21 @@ class TemporalSearchEngine:
                 
         final_candidates = []
         
-        # Find valid chronological sequences within the same video
+        # Find valid chronological sequences within the same video.  The
+        # alignment helper supports any number of sub-events and never emits a
+        # partial chain.
         for vid, event_lists in video_map.items():
             # If the video doesn't contain matches for ALL sub-events, skip it
             if any(len(lst) == 0 for lst in event_lists):
                 continue
                 
-            # For Batch 1, we handle N=2 sub-events using simple nested loop
-            if len(sub_events) == 2:
-                best_chain_score = -1
-                best_chain = None
-                
-                for c1 in event_lists[0]:
-                    for c2 in event_lists[1]:
-                        frame1 = c1["frame_id"]
-                        frame2 = c2["frame_id"]
-                        
-                        # Constraint: Event 1 MUST happen before Event 2
-                        if frame1 < frame2:
-                            # TycheVid Window Constraint: Must happen within TEMPORAL_WINDOW keyframes (approx. max time gap)
-                            # (If config.TEMPORAL_WINDOW is set. For simplicity, we just ensure frame1 < frame2 here)
-                            
-                            score_sum = c1["score"] + c2["score"]
-                            if score_sum > best_chain_score:
-                                best_chain_score = score_sum
-                                best_chain = (c1, c2)
-                                
-                if best_chain:
-                    # Return the primary event's frame as the result, but with boosted score
-                    res = best_chain[0].copy()
-                    res["score"] = best_chain_score  # The combined score is much higher
-                    res["matched_sequence"] = [c["frame_id"] for c in best_chain]
-                    final_candidates.append(res)
+            chains = align_event_candidates(event_lists, beam_size=max(10, top_k), max_sequences=1)
+            if chains:
+                chain = chains[0]
+                res = chain["events"][0].copy()
+                res["score"] = chain["sequence_score"]
+                res["matched_sequence"] = [c["frame_id"] for c in chain["events"]]
+                final_candidates.append(res)
                     
         # Sort the final videos by the strongest valid temporal chain found
         final_candidates.sort(key=lambda x: x["score"], reverse=True)

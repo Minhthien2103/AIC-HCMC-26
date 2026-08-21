@@ -1,199 +1,276 @@
-﻿import torch
+"""Qwen2-VL inference wrapper for the Linux/CUDA submission runtime."""
+
+from __future__ import annotations
+
+import json
+import re
+from importlib.metadata import PackageNotFoundError, version
+from typing import Any
+
+import torch
 from PIL import Image
 
+
 class VLMPipeline:
-    def __init__(self, model_name="Qwen/Qwen2-VL-7B-Instruct"):
+    def __init__(
+        self,
+        model_name: str = "Qwen/Qwen2-VL-7B-Instruct",
+        device: str | None = None,
+        *,
+        local_files_only: bool = False,
+        load_mode: str = "4bit",
+    ):
+        if load_mode not in {"4bit", "bf16"}:
+            raise ValueError("load_mode must be '4bit' or 'bf16'")
         self.model_name = model_name
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.local_files_only = local_files_only
+        self.load_mode = load_mode
         self.model = None
         self.processor = None
-        
-    def load(self):
+
+    def load(self) -> None:
         if self.model is not None:
             return
-            
-        from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
-        print(f"Loading VLM {self.model_name} in 4-bit with CPU offload...")
-        quant_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            # llm_int8_enable_fp32_cpu_offload removed due to Qwen2-VL vision tower meta tensor bug
-        )
-        
+        if self.device != "cuda" or not torch.cuda.is_available():
+            raise RuntimeError("Qwen2-VL inference requires a Linux/CUDA runtime (use Colab GPU).")
+
+        if self.load_mode == "4bit":
+            try:
+                bnb_version = version("bitsandbytes")
+            except PackageNotFoundError as exc:
+                raise RuntimeError("Install bitsandbytes>=0.46.1 before loading Qwen2-VL.") from exc
+            if tuple(int(part) for part in re.findall(r"\d+", bnb_version)[:3]) < (0, 46, 1):
+                raise RuntimeError(f"bitsandbytes {bnb_version} is too old; install bitsandbytes>=0.46.1")
+        elif not torch.cuda.is_bf16_supported():
+            raise RuntimeError("The selected GPU does not support BF16; use --vlm-mode 4bit instead.")
+
+        from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2VLForConditionalGeneration
+
+        model_kwargs = {
+            "device_map": "auto",
+            "attn_implementation": "sdpa",
+            "local_files_only": self.local_files_only,
+        }
+        if self.load_mode == "4bit":
+            print(f"Loading VLM {self.model_name} in 4-bit CUDA mode...")
+            model_kwargs.update({
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                ),
+                "torch_dtype": torch.float16,
+            })
+        else:
+            print(f"Loading VLM {self.model_name} in BF16 CUDA mode...")
+            model_kwargs["torch_dtype"] = torch.bfloat16
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            self.model_name, 
-            quantization_config=quant_config, 
-            device_map="auto", max_memory={0: "12GB", "cpu": "16GB"}, torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa"
+            self.model_name,
+            **model_kwargs,
         )
-        self.processor = AutoProcessor.from_pretrained(self.model_name)
+        self.processor = AutoProcessor.from_pretrained(self.model_name, local_files_only=self.local_files_only)
         self.model.eval()
         print("VLM loaded successfully!")
 
-    def _get_device(self):
-        """Returns the primary device of the model."""
+    def _input_device(self) -> torch.device:
+        if self.model is None:
+            return torch.device("cuda")
         try:
             return next(self.model.parameters()).device
-        except Exception:
-            return torch.device("cpu")
+        except StopIteration:
+            return torch.device("cuda")
+
+    def _prepare(self, messages: list[dict], image: Image.Image | None = None):
+        if self.model is None or self.processor is None:
+            self.load()
+        text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        kwargs = {"text": [text], "padding": True, "return_tensors": "pt"}
+        if image is not None:
+            kwargs["images"] = [image]
+        inputs = self.processor(**kwargs)
+        return inputs.to(self._input_device())
+
+    def _generate_text(self, inputs, max_new_tokens: int) -> str:
+        with torch.inference_mode():
+            generated_ids = self.model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+            )
+        trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
+        return self.processor.batch_decode(
+            trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0].strip()
+
+    def answer_question_details(self, image_path: str, question: str) -> dict[str, Any] | None:
+        """Answer from visible evidence, returning machine-checkable confidence."""
+        image = Image.open(image_path).convert("RGB")
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    "Answer this visual question using only what is visible. Return ONLY valid JSON exactly as "
+                    "{\"answer\": \"\", \"visible_evidence\": [], \"confidence\": 0}. "
+                    "confidence is an integer from 0 to 3. Use 0 when the requested fact is not visible; do not guess. "
+                    f"Question: {question}"
+                )},
+            ],
+        }]
+        parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=96))
+        if parsed is None or not isinstance(parsed.get("answer"), str) or isinstance(parsed.get("confidence"), bool):
+            return None
+        confidence = int(parsed["confidence"])
+        if not 0 <= confidence <= 3:
+            return None
+        return {
+            "answer": parsed["answer"].strip(),
+            "visible_evidence": self._string_list(parsed.get("visible_evidence")),
+            "confidence": confidence,
+        }
 
     def answer_question(self, image_path: str, question: str) -> str:
-        if self.model is None:
-            self.load()
-            
-        try:
-            image = Image.open(image_path).convert("RGB")
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image"},
-                        {"type": "text", "text": question + "\n\nCRITICAL INSTRUCTION: You are a strict factual image analyzer. Base your answer ONLY on what is clearly and unambiguously visible in the image. If the specific object, action, or detail asked in the question is obscured, out of frame, not visible, or you are unsure, you MUST state that it is not visible or nothing is there. Under NO circumstances should you guess. For example, if asked what someone is holding and the hand is empty or not visible, answer: \"Not holding anything\"."}
-                    ]
-                }
-            ]
-            
-            text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            
-            inputs = self.processor(
-                text=[text],
-                images=[image],
-                padding=True,
-                return_tensors="pt"
-            ).to("cuda" if torch.cuda.is_available() else "cpu")
-            
-            with torch.no_grad():
-                generated_ids = self.model.generate(**inputs, max_new_tokens=128)
-                
-            generated_ids_trimmed = [
-                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-            ]
-            
-            output_text = self.processor.batch_decode(
-                generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-            )[0]
-            
-            return output_text.strip()
-            
-        except Exception as e:
-            return f"Error during VLM inference: {str(e)}"
-            
+        """Compatibility wrapper used by older UI paths."""
+        details = self.answer_question_details(image_path, question)
+        return str(details.get("answer", "")) if details else ""
+
     def extract_events(self, video_desc: str) -> list[str]:
-        if self.model is None:
-            self.load()
-            
-        try:
-            prompt = (
-                f"Extract a chronological list of discrete events from the following video description. "
-                f"Output ONLY a comma-separated list of the events in English, with no other text. "
-                f"Video description: {video_desc}"
-            )
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt}
-                    ]
-                }
-            ]
-            
-            text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            
-            inputs = self.processor(
-                text=[text],
-                padding=True,
-                return_tensors="pt"
-            ).to("cuda" if torch.cuda.is_available() else "cpu")
-            
-            with torch.no_grad():
-                generated_ids = self.model.generate(**inputs, max_new_tokens=128)
-                
-            generated_ids_trimmed = [
-                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-            ]
-            
-            output_text = self.processor.batch_decode(
-                generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-            )[0]
-            
-            # Parse the comma-separated output
-            events = [e.strip() for e in output_text.split(",") if e.strip()]
-            return events
-            
-        except Exception as e:
-            print(f"Error during event extraction: {str(e)}")
-            return []
+        messages = [{
+            "role": "user",
+            "content": [{"type": "text", "text": (
+                "Extract a chronological list of discrete events. Output ONLY a comma-separated list in English. "
+                f"Description: {video_desc}"
+            )}],
+        }]
+        raw = self._generate_text(self._prepare(messages), max_new_tokens=128)
+        return [event.strip() for event in raw.split(",") if event.strip()]
 
     def _text_only_generate(self, prompt: str, max_new_tokens: int = 512) -> str:
-        """Internal: text-only inference using the loaded VLM (no image)."""
-        if self.model is None:
-            self.load()
         messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-        text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.processor(text=[text], padding=True, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
-        with torch.no_grad():
-            generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-        trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated_ids)]
-        return self.processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0].strip()
+        return self._generate_text(self._prepare(messages), max_new_tokens=max_new_tokens)
+
+    @staticmethod
+    def _json_object(raw: str) -> dict[str, Any] | None:
+        match = re.search(r"\{.*?\}", raw, re.DOTALL)
+        if not match:
+            return None
+        try:
+            value = json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return list(dict.fromkeys(
+            text for text in (str(item).strip() for item in value) if text
+        ))
+
+    def analyze_kis_query(self, english_query: str, *, evidence_text: str = "") -> dict[str, list[str]]:
+        """Produce additive retrieval constraints without replacing the query.
+
+        ``evidence_text`` is read from an offline cache prepared before the
+        final run. It may clarify named entities, but never overrides what the
+        user asked to see in the supplied query.
+        """
+        prompt = (
+            "You are preparing a visual known-item video search. Return ONLY valid JSON with keys "
+            "visual_queries, metadata_queries, ocr_queries, visible_constraints, factual_entities. Every value is "
+            "an array of concise English strings. visual_queries restate visible scenes/actions. metadata_queries "
+            "contain titles, entities, places or event names useful in official video metadata. ocr_queries contain "
+            "text likely to appear on screen. visible_constraints contain only discriminative things a frame can show. "
+            "factual_entities contains named people, places, organisations or vehicles supported by the description "
+            "or supplied offline evidence. Do not invent an event and do not omit original constraints.\n"
+            f"Description: {english_query}\n"
+            f"Offline evidence (possibly empty): {evidence_text[:6000]}"
+        )
+        raw = self._text_only_generate(prompt, max_new_tokens=256)
+        parsed = self._json_object(raw)
+        if parsed is None:
+            raise ValueError(f"KIS query analysis is not valid JSON: {raw[:200]}")
+        return {
+            "visual_queries": self._string_list(parsed.get("visual_queries")),
+            "metadata_queries": self._string_list(parsed.get("metadata_queries")),
+            "ocr_queries": self._string_list(parsed.get("ocr_queries")),
+            "visible_constraints": self._string_list(parsed.get("visible_constraints")),
+            "factual_entities": self._string_list(parsed.get("factual_entities")),
+        }
+
+    def score_kis_match_details(
+        self,
+        image_path: str,
+        original_query: str,
+        must_have: list[str],
+    ) -> dict[str, Any] | None:
+        """Return Qwen visual evidence used as one rank-fusion source."""
+        criteria = "\n".join(f"- {item}" for item in must_have) or "- Use the original description."
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    "Score how well this image matches the visual known-item search below. "
+                    "Return ONLY valid JSON exactly like {\"score\": 0, \"visible_requirements\": []}. "
+                    "Use 0 for unrelated/contradicted, 1 for only broad context, 2 for most visible "
+                    "requirements, and 3 for all visible requirements. Do not infer details that cannot "
+                    "be seen in the image. visible_requirements must list only requirements directly visible in "
+                    "this image.\n"
+                    f"Original description: {original_query}\n"
+                    f"Visible requirements:\n{criteria}"
+                )},
+            ],
+        }]
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=32))
+            if parsed is None or isinstance(parsed.get("score"), bool):
+                return None
+            score = int(parsed["score"])
+            if not 0 <= score <= 3:
+                return None
+            return {
+                "score": score,
+                "visible_requirements": self._string_list(parsed.get("visible_requirements")),
+            }
+        except Exception as exc:
+            print(f"[KIS] Qwen visual re-rank skipped for {image_path}: {exc}")
+            return None
+
+    def score_kis_match(
+        self,
+        image_path: str,
+        original_query: str,
+        must_have: list[str],
+    ) -> int | None:
+        """Compatibility wrapper for existing callers."""
+        details = self.score_kis_match_details(image_path, original_query, must_have)
+        return int(details["score"]) if details is not None else None
 
     def analyze_vqa_query(self, english_question: str) -> dict:
-        """
-        Improvements #7, #8, #11, #12 (VQA):
-        Single Qwen2-VL text-only call with interleaved CoT JSON output.
-        Returns: retrieval_description, vlm_question, paraphrases, objects_required,
-                 needs_fact_lookup, fact_query.
-        """
-        import json, re
-
         prompt = (
-            "You are a video retrieval assistant. Analyze the user question and output ONLY valid JSON.\n\n"
-            "EXAMPLE:\n"
-            "Question: \"What is the man in the red shirt holding?\"\n"
-            "{\n"
-            '  "fact_reasoning": "No external lookup needed, purely visual.",\n'
-            '  "needs_fact_lookup": false,\n'
-            '  "fact_query": "",\n'
-            '  "retrieval_description": "A man wearing a red shirt",\n'
-            '  "vlm_question": "What object is this man holding in his hands?",\n'
-            '  "paraphrase_reasoning": "Vary the description to increase recall.",\n'
-            '  "paraphrases": ["person in red clothing holding something", "man with red top grasping an object"],\n'
-            '  "object_reasoning": "Query mentions a person and a shirt.",\n'
-            '  "objects_required": ["Person", "Shirt"]\n'
-            "}\n\n"
-            "EXAMPLE 2:\n"
-            "Question: \"Which country has the highest GDP according to this news?\"\n"
-            "{\n"
-            '  "fact_reasoning": "Highest GDP country needs external lookup for accuracy.",\n'
-            '  "needs_fact_lookup": true,\n'
-            '  "fact_query": "which country has the highest GDP in the world",\n'
-            '  "retrieval_description": "news broadcast about economy and GDP rankings",\n'
-            '  "vlm_question": "Which country is mentioned as having the highest GDP?",\n'
-            '  "paraphrase_reasoning": "Search for economic news content.",\n'
-            '  "paraphrases": ["economic rankings news segment", "GDP world ranking broadcast"],\n'
-            '  "object_reasoning": "No specific objects to filter.",\n'
-            '  "objects_required": []\n'
-            "}\n\n"
-            f'Now analyze:\nQuestion: "{english_question}"\n'
-            "Output ONLY the JSON object, no other text."
+            "Analyze the question and output ONLY valid JSON with keys "
+            "retrieval_description, vlm_question, paraphrases, metadata_queries, ocr_queries, objects_required, "
+            "needs_fact_lookup, fact_query. metadata_queries and ocr_queries are optional retrieval text; "
+            "do not invent facts.\n"
+            f"Question: {english_question}"
         )
-
-        raw = self._text_only_generate(prompt, max_new_tokens=400)
-
-        # Robust JSON extraction (handle surrounding text)
+        raw = self._text_only_generate(prompt, max_new_tokens=256)
         try:
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
-                return json.loads(match.group(0))
-        except Exception:
+                parsed = json.loads(match.group(0))
+                return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
             pass
-
-        # Fallback: return safe defaults so pipeline continues
-        print(f"[VLM] analyze_vqa_query JSON parse failed. Raw: {raw[:200]}")
+        print(f"[VLM] Could not parse query analysis: {raw[:200]}")
         return {
             "needs_fact_lookup": False,
             "fact_query": "",
@@ -203,34 +280,89 @@ class VLMPipeline:
             "objects_required": [],
         }
 
-    def verify_frame(self, image_path: str, retrieval_description: str) -> bool:
-        """
-        Improvement #5 (VQA): Visual yes/no verification.
-        Returns True if the frame visually matches the retrieval description.
-        """
-        if self.model is None:
-            self.load()
+    def analyze_trake_query(self, description: str, events: list[str]) -> dict[str, Any]:
+        """Create independent event queries and only explicit temporal edges.
 
+        Edge indices are zero-based and are intentionally absent when the
+        source wording does not assert an order. This prevents an invented
+        chronological constraint from excluding a valid sequence.
+        """
         prompt = (
-            f"Does this image match the description: '{retrieval_description}'?\n"
-            "Answer with ONLY 'yes' or 'no'."
+            "Return ONLY valid JSON with keys retrieval_queries, event_queries, temporal_edges. "
+            "retrieval_queries is an array for selecting the target video. event_queries is an array with exactly "
+            f"{len(events)} arrays, one per listed event, containing visual paraphrases. temporal_edges is an array "
+            "of [before_index, after_index] zero-based pairs ONLY where the description explicitly states before, "
+            "after, then, next, followed by, or another unambiguous temporal relation. Do not assume the numbered "
+            "event list is chronological.\n"
+            f"Description: {description}\nEvents: {json.dumps(events, ensure_ascii=False)}"
         )
+        parsed = self._json_object(self._text_only_generate(prompt, max_new_tokens=384))
+        if parsed is None:
+            raise ValueError("TRAKE query analysis is not valid JSON")
+        raw_events = parsed.get("event_queries")
+        event_queries: list[list[str]] = []
+        if isinstance(raw_events, list):
+            for index in range(len(events)):
+                value = raw_events[index] if index < len(raw_events) else []
+                event_queries.append(self._string_list(value))
+        else:
+            event_queries = [[] for _ in events]
+        edges: list[tuple[int, int]] = []
+        for edge in parsed.get("temporal_edges", []):
+            if not isinstance(edge, list | tuple) or len(edge) != 2:
+                continue
+            try:
+                before, after = int(edge[0]), int(edge[1])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= before < len(events) and 0 <= after < len(events) and before != after and (before, after) not in edges:
+                edges.append((before, after))
+        return {
+            "retrieval_queries": self._string_list(parsed.get("retrieval_queries")),
+            "event_queries": event_queries,
+            "temporal_edges": edges,
+        }
+
+    def score_event_match_details(self, image_path: str, event: str) -> dict[str, Any] | None:
+        """Return one rankable visual-evidence vote for a TRAKE event."""
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    "Does this frame show the event below? Return ONLY valid JSON exactly as "
+                    "{\"score\": 0, \"visible_evidence\": []}. score is 0..3; use 0 if the event is not visible. "
+                    f"Event: {event}"
+                )},
+            ],
+        }]
         try:
-            image = Image.open(image_path).convert("RGB")
-            messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]}]
-            text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = self.processor(text=[text], images=[image], padding=True, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
-            with torch.no_grad():
-                generated_ids = self.model.generate(**inputs, max_new_tokens=5)
-            trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated_ids)]
-            answer = self.processor.batch_decode(trimmed, skip_special_tokens=True)[0].strip().lower()
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=48))
+            if parsed is None or isinstance(parsed.get("score"), bool):
+                return None
+            score = int(parsed["score"])
+            if not 0 <= score <= 3:
+                return None
+            return {"score": score, "visible_evidence": self._string_list(parsed.get("visible_evidence"))}
+        except Exception as exc:
+            print(f"[TRAKE] Qwen event scoring skipped for {image_path}: {exc}")
+            return None
+
+    def verify_frame(self, image_path: str, retrieval_description: str) -> bool:
+        messages = [{
+            "role": "user",
+            "content": [{"type": "image"}, {"type": "text", "text": (
+                f"Does this image match the description: {retrieval_description}? Answer ONLY yes or no."
+            )}],
+        }]
+        try:
+            answer = self._generate_text(
+                self._prepare(messages, Image.open(image_path).convert("RGB")),
+                max_new_tokens=5,
+            ).lower()
             return answer.startswith("yes")
-        except Exception as e:
-            print(f"[VLM] verify_frame error: {e}")
-            return True  # Default to keeping the frame if verification fails
-
-
-
-
-
-
+        except Exception as exc:
+            print(f"[VLM] verify_frame error: {exc}")
+            return True

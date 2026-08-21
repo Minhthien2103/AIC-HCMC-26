@@ -1,178 +1,207 @@
-﻿import sys
-import json
-import re
-from pathlib import Path
-from deep_translator import GoogleTranslator
-from tqdm import tqdm
+"""Video-first visual question answering."""
 
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
+
 from src import config
-
-
-def _rrf_fusion(ranked_lists: list, k: int = None) -> list:
-    """
-    Improvement #7: Reciprocal Rank Fusion.
-    Fuses multiple FAISS result lists into one ranked list.
-    """
-    if k is None:
-        k = config.VQA_RRF_K
-    scores = {}
-    for ranked_list in ranked_lists:
-        for rank, candidate in enumerate(ranked_list):
-            fid = candidate["faiss_idx"]
-            if fid not in scores:
-                scores[fid] = {"rrf_score": 0.0, "data": candidate}
-            scores[fid]["rrf_score"] += 1.0 / (k + rank + 1)
-    fused = sorted(scores.values(), key=lambda x: x["rrf_score"], reverse=True)
-    for item in fused:
-        item["data"]["score"] = item["rrf_score"]
-    return [item["data"] for item in fused]
-
-
-def _external_search(query: str) -> str:
-    """
-    Improvement #12: External fact lookup via DuckDuckGo.
-    Returns a short text summary from top results.
-    """
-    try:
-        from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=3))
-        if results:
-            snippets = [r.get("body", "") for r in results[:2]]
-            return " ".join(snippets)[:500]
-    except Exception as e:
-        print(f"[VQA] External search failed: {e}")
-    return ""
+from src.online_pipeline.rank_fusion import candidate_identity, fuse_rankings
+from src.online_pipeline.video_evidence import d_hondt_allocate, fuse_video_rankings, stratified_candidates
+from src.utils.translation import translate_vi_to_en
 
 
 class VQATask:
-    def __init__(self, encoder, retriever, object_filter=None, vlm_pipeline=None, semantic_filter=None):
+    """Select videos by ranked evidence before asking Qwen for an answer."""
+
+    def __init__(
+        self,
+        encoder,
+        retriever,
+        object_filter=None,
+        vlm_pipeline=None,
+        semantic_filter=None,
+        *,
+        media_retriever=None,
+        ocr=None,
+        frame_neighborhood=None,
+        qwen_candidate_budget: int | None = None,
+        neighborhood_count: int | None = None,
+    ):
         self.encoder = encoder
         self.retriever = retriever
-        self.object_filter = object_filter        # Original ObjectFilter (still used for filter_candidates)
+        self.object_filter = object_filter  # no longer boosts VQA ranking
         self.vlm_pipeline = vlm_pipeline
-        self.semantic_filter = semantic_filter    # SemanticObjectFilter (Improvement #9)
+        self.semantic_filter = semantic_filter
+        self.media_retriever = media_retriever
+        self.ocr = ocr
+        self.frame_neighborhood = frame_neighborhood
+        self.qwen_candidate_budget = int(qwen_candidate_budget or config.VQA_QWEN_CANDIDATE_BUDGET)
+        self.neighborhood_count = int(neighborhood_count or config.FRAME_NEIGHBORHOOD_COUNT)
 
-    def execute(self, question: str, top_k: int = None, progress_callback=None) -> tuple:
-        if top_k is None:
-            top_k = config.VQA_RERANK_K
+    @staticmethod
+    def _unique(values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if str(value).strip()))
 
-        # ── Step 1: Translate ─────────────────────────────────────────────
+    def _global_source(self, queries: list[str], top_k: int) -> list[dict[str, Any]]:
+        encode_batch = getattr(self.encoder, "encode_text_batch", None)
+        vectors = encode_batch(queries) if callable(encode_batch) else [self.encoder.encode_text(query) for query in queries]
+        search_batch = getattr(self.retriever, "search_batch", None)
+        values = search_batch(vectors, top_k=top_k) if callable(search_batch) else [self.retriever.search(vector, top_k=top_k) for vector in vectors]
+        return fuse_rankings([(f"query_{index}", rows) for index, rows in enumerate(values)], rrf_k=config.VQA_RRF_K)
+
+    def _local_source(self, queries: list[str], video_ids: list[str], budget: int) -> list[dict[str, Any]]:
+        encode_batch = getattr(self.encoder, "encode_text_batch", None)
+        vectors = encode_batch(queries) if callable(encode_batch) else [self.encoder.encode_text(query) for query in queries]
+        lists = [[] for _ in vectors]
+        for video_id in video_ids:
+            try:
+                batch = getattr(self.retriever, "search_in_video_batch", None)
+                per_query = batch(vectors, video_id=video_id, top_k=budget) if callable(batch) else [self.retriever.search_in_video(vector, video_id, budget) for vector in vectors]
+            except AttributeError:
+                per_query = [[item for item in self.retriever.search(vector, top_k=max(100, budget)) if str(item.get("video_id")) == video_id][:budget] for vector in vectors]
+            for index, rows in enumerate(per_query):
+                lists[index].extend(rows)
+        return fuse_rankings([(f"local_{index}", rows) for index, rows in enumerate(lists)], rrf_k=config.VQA_RRF_K)
+
+    @staticmethod
+    def _by_video(candidates: list[dict[str, Any]], ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        grouped = {video_id: [] for video_id in ids}
+        for candidate in candidates:
+            video_id = str(candidate.get("video_id", "")).removesuffix(".mp4")
+            if video_id in grouped:
+                grouped[video_id].append(candidate)
+        for rows in grouped.values():
+            rows.sort(key=lambda item: (-float(item.get("score", 0.0)), candidate_identity(item)))
+        return grouped
+
+    def _analysis(self, question: str) -> dict[str, Any]:
+        default = {"retrieval_description": question, "vlm_question": question, "paraphrases": [], "metadata_queries": [], "ocr_queries": []}
+        if self.vlm_pipeline is None:
+            return default
         try:
-            english_question = GoogleTranslator(source="vi", target="en").translate(question)
-        except Exception as e:
-            print(f"[VQA] Translation failed: {e}")
-            english_question = question
+            raw = self.vlm_pipeline.analyze_vqa_query(question) or {}
+            return {
+                "retrieval_description": str(raw.get("retrieval_description") or question),
+                "vlm_question": str(raw.get("vlm_question") or question),
+                "paraphrases": self._unique([str(value) for value in raw.get("paraphrases", [])]),
+                "metadata_queries": self._unique([str(value) for value in raw.get("metadata_queries", [])]),
+                "ocr_queries": self._unique([str(value) for value in raw.get("ocr_queries", [])]),
+            }
+        except Exception as exc:
+            print(f"[VQA] Qwen analysis unavailable: {exc}")
+            return default
 
-        # ── Step 2: LLM Query Analysis (Improvements #7, #8, #11, #12) ───
-        analysis = {
-            "needs_fact_lookup": False,
-            "fact_query": "",
-            "retrieval_description": english_question,
-            "vlm_question": english_question,
-            "paraphrases": [],
-            "objects_required": [],
-        }
-        if self.vlm_pipeline:
+    def execute(self, question: str, top_k: int | None = None, progress_callback=None, allow_external_search: bool | None = None) -> tuple[list[dict], dict]:
+        del allow_external_search
+        top_k = config.VQA_RERANK_K if top_k is None else max(1, min(int(top_k), config.VQA_MAX_CANDIDATES))
+        english = translate_vi_to_en(question)
+        analysis = self._analysis(english)
+        retrieval_queries = self._unique([english, analysis["retrieval_description"], *analysis["paraphrases"]])
+        global_frames = self._global_source(retrieval_queries, top_k=max(1000, top_k * 10))
+        video_sources: list[tuple[str, list[dict[str, Any]]]] = [("clip_vitb32", global_frames)]
+        if self.media_retriever is not None:
             try:
-                analysis = self.vlm_pipeline.analyze_vqa_query(english_question)
-            except Exception as e:
-                print(f"[VQA] analyze_vqa_query failed: {e}. Using defaults.")
-
-        retrieval_desc = analysis.get("retrieval_description", english_question)
-        vlm_question   = analysis.get("vlm_question", question)
-        paraphrases    = analysis.get("paraphrases", [])[:config.VQA_PARAPHRASE_N]
-        objects_req    = analysis.get("objects_required", [])
-
-        # ── Step 3: External Fact Lookup (Improvement #12) ────────────────
-        if analysis.get("needs_fact_lookup") and analysis.get("fact_query"):
-            fact_text = _external_search(analysis["fact_query"])
-            if fact_text:
-                # Ask LLM to rewrite retrieval_desc with the resolved fact
-                if self.vlm_pipeline:
-                    try:
-                        rewrite_prompt = (
-                            f"Rewrite this video search description using the following fact.\n"
-                            f"Original: '{retrieval_desc}'\n"
-                            f"Fact: '{fact_text[:200]}'\n"
-                            f"Output ONLY the rewritten description, no other text."
-                        )
-                        retrieval_desc = self.vlm_pipeline._text_only_generate(rewrite_prompt, max_new_tokens=80).strip()
-                    except Exception as e:
-                        print(f"[VQA] Fact rewrite failed: {e}")
-
-        # ── Step 4: Multi-Query FAISS + RRF (Improvements #7, #11) ────────
-        candidates_per_k = max(config.VQA_CANDIDATES, top_k * 4)
-        all_queries = [retrieval_desc] + paraphrases
-        ranked_lists = []
-        for q in all_queries:
+                media = []
+                for query in self._unique([english, *analysis["metadata_queries"]]):
+                    for rank, item in enumerate(self.media_retriever.search(query, top_k=config.VQA_VIDEO_BUDGET * 4), start=1):
+                        row = item.copy()
+                        row["video_id"] = str(row["video_id"]).removesuffix(".mp4")
+                        row["score"] = float(row.get("metadata_score", 0.0))
+                        row["metadata_rank"] = rank
+                        media.append(row)
+                if media:
+                    video_sources.append(("btc_media_e5", media))
+            except Exception as exc:
+                print(f"[VQA] Media E5 unavailable: {exc}")
+        videos = fuse_video_rankings(video_sources, rrf_k=config.VQA_RRF_K)[:config.VQA_VIDEO_BUDGET]
+        ids = [str(video["video_id"]) for video in videos]
+        local = self._local_source(retrieval_queries, ids, config.VQA_LOCAL_FRAME_BUDGET)
+        if self.ocr is not None:
             try:
-                vec = self.encoder.encode_text(q)
-                ranked_lists.append(self.retriever.search(query_vector=vec, top_k=candidates_per_k))
-            except Exception as e:
-                print(f"[VQA] FAISS search failed for query '{q[:40]}': {e}")
-
-        if len(ranked_lists) > 1:
-            candidates = _rrf_fusion(ranked_lists)
-        elif ranked_lists:
-            candidates = ranked_lists[0]
-        else:
-            return []
-
-        # ── Step 5: Semantic Object Filter (Improvements #3, #9) ──────────
-        if self.semantic_filter and objects_req:
-            # Semantic filter already extracted objects from LLM, pass directly
-            if self.object_filter:
-                candidates = self.object_filter.filter_candidates(
-                    candidates, objects_req, mode="boost"
+                ocr_queries = self._unique([english, *analysis["ocr_queries"]])
+                ocr_pool = stratified_candidates(
+                    self._by_video(local, ids), videos, limit=config.KIS_OCR_CANDIDATE_BUDGET
                 )
-        elif self.object_filter and not self.semantic_filter:
-            # Fallback: use old Regex extraction if no semantic filter
-            all_labels = self.object_filter.get_all_labels()
-            query_lower = english_question.lower()
-            req_objs = []
-            for label in all_labels:
-                pattern = r'\b' + re.escape(label.lower()) + r'(?:s|es)?\b'
-                if re.search(pattern, query_lower):
-                    req_objs.append(label)
-            if req_objs:
-                candidates = self.object_filter.filter_candidates(candidates, req_objs, mode="boost")
-
-        # Improvement #9: dynamic weight w=0 if no objects required
-        # (handled implicitly: if objects_req is empty, no boost is applied above)
-
-        candidates = candidates[:top_k * 2]
-
-        # ── Step 6: VLM Verification + Rerank (Improvement #5) ────────────
-        if self.vlm_pipeline:
-            for c in candidates:
-                try:
-                    verified = self.vlm_pipeline.verify_frame(
-                        str(config.KEYFRAMES_DIR / c["video_id"] / (c["keyframe_name"] + ".jpg")), retrieval_desc
-                    )
-                    c["verified"] = verified
-                    if verified:
-                        c["score"] = c.get("score", 0) + config.VQA_VERIFICATION_BOOST
-                except Exception as e:
-                    c["verified"] = True  # Keep frame if verification errors
-            candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-        candidates = candidates[:top_k]
-
-        # ── Step 7: VLM Answering ──────────────────────────────────────────
-        for c in candidates:
-            if self.vlm_pipeline:
-                try:
-                    c["answer"] = self.vlm_pipeline.answer_question(
-                        str(config.KEYFRAMES_DIR / c["video_id"] / (c["keyframe_name"] + ".jpg")), vlm_question
-                    )
-                except Exception as e:
-                    c["answer"] = f"[VLM Error: {e}]"
+                ocr_lists = [
+                    self.ocr.rank(text, ocr_pool, lambda item: config.keyframe_path(item["video_id"], item["keyframe_name"]))
+                    for text in ocr_queries
+                ]
+                ocr_rows = fuse_rankings([(f"ocr_{index}", rows) for index, rows in enumerate(ocr_lists)], rrf_k=config.VQA_RRF_K)
+                if ocr_rows:
+                    local = fuse_rankings([("clip_local", local), ("candidate_ocr_e5", ocr_rows)], rrf_k=config.VQA_RRF_K)
+            except Exception as exc:
+                print(f"[VQA] Candidate OCR unavailable: {exc}")
+        video_evidence = {str(video["video_id"]): video for video in videos}
+        for candidate in local:
+            evidence = video_evidence.get(str(candidate.get("video_id", "")).removesuffix(".mp4"))
+            if evidence is not None:
+                candidate["video_rank"] = int(evidence["video_rank"])
+                candidate["video_rrf_score"] = float(evidence["rrf_score"])
+                candidate["video_source_ranks"] = dict(evidence["video_source_ranks"])
+                candidate["video_source_frame_ranks"] = dict(evidence["video_source_frame_ranks"])
+            candidate.setdefault("anchor_frame_id", int(candidate["frame_id"]))
+        grouped = self._by_video(local, ids)
+        answer_pool = stratified_candidates(grouped, videos, limit=self.qwen_candidate_budget)
+        answered: list[dict[str, Any]] = []
+        uncertain: list[dict[str, Any]] = []
+        for index, candidate in enumerate(answer_pool, start=1):
+            item = candidate.copy()
+            item["answer_error"] = ""
+            details = None
+            try:
+                detail_fn = getattr(self.vlm_pipeline, "answer_question_details", None) if self.vlm_pipeline else None
+                details = detail_fn(str(config.keyframe_path(item["video_id"], item["keyframe_name"])), analysis["vlm_question"]) if callable(detail_fn) else None
+                if details is None and self.vlm_pipeline:
+                    answer = self.vlm_pipeline.answer_question(str(config.keyframe_path(item["video_id"], item["keyframe_name"])), analysis["vlm_question"])
+                    details = {"answer": answer, "visible_evidence": [], "confidence": 1}
+            except Exception as exc:
+                item["answer_error"] = str(exc)
+            if not details:
+                continue
+            answer = str(details.get("answer") or "").strip()
+            if not answer:
+                continue
+            item["answer"] = answer
+            item["visible_evidence"] = list(details.get("visible_evidence") or [])
+            item["answer_confidence"] = int(details.get("confidence", 0))
+            item["answer_input_rank"] = index
+            if item["answer_confidence"] > 0:
+                answered.append(item)
             else:
-                c["answer"] = "[Manual Review Required - No VLM loaded]"
-
-        return candidates, analysis
-
-
-
+                uncertain.append(item)
+            if progress_callback and item["answer_confidence"] > 0:
+                progress_callback(len(answered), top_k)
+        if not answered and uncertain:
+            # A low-confidence, non-empty answer is still preferable to
+            # aborting the complete 25-query batch. Rank repeated answers
+            # first so independent frames can corroborate one another.
+            agreement = Counter(str(item["answer"]).casefold() for item in uncertain)
+            uncertain.sort(
+                key=lambda item: (
+                    -agreement[str(item["answer"]).casefold()],
+                    -float(item.get("score", 0.0)),
+                    int(item["answer_input_rank"]),
+                )
+            )
+            answered = uncertain
+            print(f"[VQA] no positive-confidence answer; using {len(uncertain)} non-empty best-effort answers")
+        elif not answered and answer_pool:
+            # Keep the output contract complete even when Qwen rejects every
+            # retrieved frame. The explicit marker is valid CSV content and
+            # the retrieval candidate remains available for manual review.
+            fallback = answer_pool[0].copy()
+            fallback.update({
+                "answer": "Không xác định",
+                "visible_evidence": [],
+                "answer_confidence": 0,
+                "answer_input_rank": 1,
+                "answer_error": "no non-empty Qwen answer",
+            })
+            answered = [fallback]
+            print("[VQA] WARNING: all Qwen answers were empty; emitting one retrieval-only fallback row")
+        # Do not let a generic/not-visible fallback silently occupy rank one.
+        answered.sort(key=lambda item: (-int(item["answer_confidence"]), -float(item.get("score", 0.0)), int(item["answer_input_rank"])))
+        if self.frame_neighborhood is not None:
+            answered = self.frame_neighborhood.expand_ranked(answered, count=self.neighborhood_count)
+        return answered[:top_k], analysis

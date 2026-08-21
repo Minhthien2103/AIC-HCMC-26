@@ -10,18 +10,25 @@ from src.offline_pipeline.objects_loader import ObjectStoreBuilder
 
 def main():
     meta_loader = MetadataLoader(config_module = config)
-    if meta_loader.parse_csvs():
-        meta_loader.save()
+    if not meta_loader.parse_csvs():
+        raise RuntimeError("Metadata ingestion failed")
+    meta_loader.save()
 
     idx_builder = FAISSIndexBuilder(config_module = config)
-    if idx_builder.build_index():
-        idx_builder.save()
+    if not idx_builder.build_index():
+        raise RuntimeError("FAISS ingestion failed")
+    idx_builder.save()
 
     obj_builder = ObjectStoreBuilder(config_module = config)
     if obj_builder.parse_jsons():
         obj_builder.save()
+    else:
+        print("Warning: object store was not rebuilt; continuing with retrieval-only indexes.")
 
-    print("Complete!")
+    print("=== Ingestion Complete ===")
+    print(f"Metadata rows: {meta_loader.master_df.height}")
+    print(f"FAISS vectors: {idx_builder.index.ntotal}")
+    print(f"Object rows: {obj_builder.objects_df.height if obj_builder.objects_df is not None else 0}")
 
 
 if __name__ == "__main__":
