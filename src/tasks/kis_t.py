@@ -235,10 +235,15 @@ class KIStask:
 
     @staticmethod
     def _by_video(candidates: list[dict[str, Any]], video_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Group only materialized frame candidates, never video-only metadata."""
         output = {video_id: [] for video_id in video_ids}
         for candidate in candidates:
             video_id = str(candidate.get("video_id", "")).removesuffix(".mp4")
-            if video_id in output:
+            if (
+                video_id in output
+                and candidate.get("frame_id") is not None
+                and str(candidate.get("keyframe_name", "")).strip()
+            ):
                 output[video_id].append(candidate)
         for rows in output.values():
             rows.sort(key=lambda item: (-float(item.get("score", 0.0)), candidate_identity(item)))

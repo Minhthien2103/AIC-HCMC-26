@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import polars as pl
+
+from src.online_pipeline.frame_neighborhood import FrameNeighborhood
 from src.tasks.kis_t import KIStask
 
 
@@ -75,6 +78,12 @@ class _Qwen:
         return 3 if image_path.endswith("007.jpg") else 1
 
 
+class _MediaRetriever:
+    def search(self, query: str, top_k: int):
+        del query, top_k
+        return [{"video_id": "V0", "metadata_score": 0.99, "metadata_text": "matching video"}]
+
+
 def test_long_query_variants_keep_tail_and_fit_context():
     task = KIStask(_Encoder(), _Retriever())
     query = "one two three four five six seven. eight nine FINAL_TARGET_TOKEN ten eleven twelve."
@@ -140,3 +149,24 @@ def test_qwen_analysis_failure_falls_back_to_clip(monkeypatch):
     # With no Qwen analysis, frame order follows video-first D'Hondt coverage
     # rather than the old all-frame global ranking.
     assert [candidate["faiss_idx"] for candidate in results] == [0, 3, 6, 9, 1]
+
+
+def test_media_video_candidates_never_enter_frame_neighborhood(monkeypatch):
+    metadata = pl.DataFrame({
+        "video_id": ["V0"] * 12,
+        "faiss_idx": list(range(12)),
+        "frame_id": list(range(12)),
+    })
+    task = KIStask(
+        _Encoder(),
+        _SingleVideoRetriever(),
+        media_retriever=_MediaRetriever(),
+        frame_neighborhood=FrameNeighborhood(metadata),
+    )
+    monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
+
+    results = task.execute("ordinary query", top_k=5)
+
+    assert len(results) == 5
+    assert all(candidate.get("frame_id") is not None for candidate in results)
+    assert all(candidate.get("keyframe_name") for candidate in results)
