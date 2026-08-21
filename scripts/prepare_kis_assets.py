@@ -58,7 +58,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--build-evidence-cache", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Check real dual indexes and OCR cache on one keyframe.")
-    parser.add_argument("--manifest", type=Path, default=REPO_ROOT / "query" / "manifest_full.json")
+    query_source = parser.add_mutually_exclusive_group()
+    query_source.add_argument("--manifest", type=Path)
+    query_source.add_argument("--queries-dir", type=Path)
     parser.add_argument("--evidence-cache", type=Path)
     parser.add_argument("--evidence-results-per-query", type=int, default=5)
     parser.add_argument("--translation-cache", type=Path)
@@ -81,7 +83,15 @@ def _configure_paths(repo_root: Path) -> None:
 def _download_media_info(url: str, archive_path: Path) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     LOGGER.info("Downloading official media-info archive from %s", url)
-    with urllib.request.urlopen(url) as response, archive_path.open("wb") as output:
+    request = urllib.request.Request(
+        url,
+        headers={
+            # BTC's download host rejects urllib's default Python user agent.
+            "User-Agent": "Mozilla/5.0 (compatible; AIC-HCMC-26 asset preparation)",
+            "Accept": "application/zip,application/octet-stream,*/*",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=120) as response, archive_path.open("wb") as output:
         shutil.copyfileobj(response, output)
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(config.DATA_DIR)
@@ -243,6 +253,14 @@ def _search_documents(query: str, count: int) -> list[dict[str, str]]:
     return documents
 
 
+def _load_specs(args: argparse.Namespace):
+    if args.manifest is not None:
+        return load_query_specs(manifest=args.manifest)
+    if args.queries_dir is not None:
+        return load_query_specs(queries_dir=args.queries_dir)
+    raise ValueError("--build-evidence-cache and --smoke-test require --manifest or --queries-dir")
+
+
 def build_evidence_cache(args: argparse.Namespace) -> None:
     if args.device != "cuda":
         raise RuntimeError("Evidence planning uses Qwen2-VL and requires --device cuda.")
@@ -255,7 +273,7 @@ def build_evidence_cache(args: argparse.Namespace) -> None:
         existing = json.loads(cache_path.read_text(encoding="utf-8"))
         if isinstance(existing, dict):
             payload = existing
-    for spec in load_query_specs(manifest=args.manifest):
+    for spec in _load_specs(args):
         if spec.query_type != "kis" or spec.query_id in payload:
             continue
         english = translate_vi_to_en(spec.description)
@@ -280,9 +298,9 @@ def build_evidence_cache(args: argparse.Namespace) -> None:
         LOGGER.info("Cached offline evidence for %s (%d docs)", spec.query_id, len(unique_docs))
 
 
-def smoke_test(device: str, manifest: Path) -> None:
+def smoke_test(device: str, args: argparse.Namespace) -> None:
     """Exercise every final KIS source using the actual prepared assets."""
-    specs = load_query_specs(manifest=manifest)
+    specs = _load_specs(args)
     query = next((spec.description for spec in specs if spec.query_type == "kis"), "")
     if not query:
         raise RuntimeError("Smoke test needs at least one KIS query in the manifest")
@@ -328,7 +346,7 @@ def main() -> int:
     if args.build_evidence_cache:
         build_evidence_cache(args)
     if args.smoke_test:
-        smoke_test(args.device, args.manifest)
+        smoke_test(args.device, args)
     if not any((args.download_media_info, args.build_media_index, args.build_vith_index, args.build_evidence_cache, args.smoke_test)):
         raise SystemExit("Select at least one preparation action; see --help.")
     return 0
