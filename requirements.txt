@@ -26,6 +26,7 @@ accelerate>=0.34.0
 sentencepiece
 bitsandbytes>=0.46.1
 sentence-transformers>=3.0.0
+paddlepaddle>=3.0.0
 paddleocr>=3.0.0
 duckduckgo-search>=6.0.0
 
