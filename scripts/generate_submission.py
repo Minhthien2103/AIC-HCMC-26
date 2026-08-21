@@ -130,7 +130,6 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
         # network during an audited final run.
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        os.environ["PADDLE_PDX_MODEL_SOURCE"] = "local"
     translation_cache = args.translation_cache or (config.INDEX_DIR / "translation_mbart_cache.json")
     # mBART handles only a few query strings; keep it on CPU so the T4 has
     # headroom for ViT-H, E5 and Qwen2-VL during candidate reranking.
