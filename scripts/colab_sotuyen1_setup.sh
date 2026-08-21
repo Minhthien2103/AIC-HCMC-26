@@ -46,7 +46,6 @@ link_asset() {
 
 require_path "$AIC_DRIVE_REPO"
 require_path "$AIC_DRIVE_REPO/keyframes.zip"
-require_path "$AIC_DRIVE_REPO/data/map-keyframes"
 require_path "$AIC_DRIVE_REPO/indexes/faiss_clip.index"
 require_path "$AIC_DRIVE_REPO/indexes/metadata.parquet"
 require_path "$AIC_DRIVE_REPO/indexes/objects.parquet"
@@ -91,18 +90,12 @@ if [[ ! -f "$KEYFRAME_MARKER" ]]; then
   touch "$KEYFRAME_MARKER"
 fi
 
-if [[ ! -d "$AIC_ASSET_ROOT/data/map-keyframes" ]]; then
-  echo "Copying frame maps from Drive..."
-  cp -a "$AIC_DRIVE_REPO/data/map-keyframes" "$AIC_ASSET_ROOT/data/map-keyframes"
-fi
-
 for name in faiss_clip.index metadata.parquet objects.parquet; do
   copy_file_atomic "$AIC_DRIVE_REPO/indexes/$name" "$AIC_ASSET_ROOT/indexes/$name"
 done
 
 mkdir -p "$AIC_CODE_DIR/data" "$AIC_CODE_DIR/query"
 link_asset "$AIC_ASSET_ROOT/data/keyframes" "$AIC_CODE_DIR/data/keyframes"
-link_asset "$AIC_ASSET_ROOT/data/map-keyframes" "$AIC_CODE_DIR/data/map-keyframes"
 link_asset "$AIC_ASSET_ROOT/indexes" "$AIC_CODE_DIR/indexes"
 
 QUERY_DIR="$AIC_CODE_DIR/query/SOTUYEN1-bo-de-thi"

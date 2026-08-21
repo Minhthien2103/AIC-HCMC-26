@@ -3,7 +3,8 @@
 This runbook deliberately leaves the old Drive checkout untouched. It clones
 `aic2026-submission` to Colab's local SSD, stages only the required 177k
 keyframes/index files locally, and writes small checkpoints plus the final ZIP
-back to Drive.
+back to Drive. `metadata.parquet` already contains the frame mapping used by
+the online pipeline, so a separate `data/map-keyframes` folder is not needed.
 
 ## 1. Select A100 and mount Drive
 
