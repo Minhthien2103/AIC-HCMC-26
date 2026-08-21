@@ -68,6 +68,22 @@ def test_review_can_only_reorder_generated_top_candidates(tmp_path: Path):
         apply_review(candidates, "query-p1-1-kis", manifest, limit=3)
 
 
+def test_review_can_pin_or_reject_only_generated_videos(tmp_path: Path):
+    candidates = [_candidate(index) for index in range(1, 6)]
+    manifest = tmp_path / "review-video.json"
+    manifest.write_text(
+        json.dumps({"queries": {"query-p1-1-kis": {
+            "pin": [], "keep": [], "reject": [],
+            "pin_video": [candidates[1]["video_id"]],
+            "keep_video": [], "reject_video": [candidates[0]["video_id"]],
+        }}}),
+        encoding="utf-8",
+    )
+    ordered = apply_review(candidates, "query-p1-1-kis", manifest, limit=3)
+    assert ordered[0]["video_id"] == candidates[1]["video_id"]
+    assert ordered[-1]["video_id"] == candidates[0]["video_id"]
+
+
 def test_btc_labelled_trake_queries_keep_four_events_in_source_order():
     query_dir = Path(__file__).resolve().parents[1] / "query" / "THUNGHIEM-bo-de-thi"
     with pytest.warns(RuntimeWarning, match="labels"):

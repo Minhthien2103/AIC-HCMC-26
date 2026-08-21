@@ -15,10 +15,11 @@ class _State:
 def align_event_candidates(
     event_lists: list[list[dict[str, Any]]],
     *,
+    temporal_edges: list[tuple[int, int]] | None = None,
     beam_size: int = 25,
     max_sequences: int = 100,
 ) -> list[dict[str, Any]]:
-    """Return complete strictly chronological event chains.
+    """Return complete event chains satisfying explicit temporal edges only.
 
     Each event list is kept separate, so a missing event makes alignment
     impossible rather than silently shortening the returned sequence.
@@ -26,18 +27,29 @@ def align_event_candidates(
     if not event_lists or any(not candidates for candidates in event_lists):
         return []
 
+    edges = list(temporal_edges or [])
+    event_count = len(event_lists)
+    if any(not (0 <= before < event_count and 0 <= after < event_count and before != after) for before, after in edges):
+        raise ValueError("Temporal edge indexes must reference distinct events")
+
+    def _valid_partial(events: list[dict[str, Any]]) -> bool:
+        for before, after in edges:
+            if before < len(events) and after < len(events):
+                if int(events[before]["frame_id"]) >= int(events[after]["frame_id"]):
+                    return False
+        return True
+
     states = [_State(score=0.0, events=[])]
     for candidates in event_lists:
         next_states: list[_State] = []
         for state in states:
-            previous_frame = state.events[-1]["frame_id"] if state.events else None
             for candidate in candidates:
-                frame_id = int(candidate["frame_id"])
-                if previous_frame is not None and frame_id <= int(previous_frame):
+                events = [*state.events, candidate]
+                if not _valid_partial(events):
                     continue
                 next_states.append(_State(
                     score=state.score + float(candidate.get("score", 0.0)),
-                    events=[*state.events, candidate],
+                    events=events,
                 ))
         if not next_states:
             return []

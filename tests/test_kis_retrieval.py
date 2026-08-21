@@ -116,12 +116,12 @@ def test_qwen_is_an_equal_evidence_source_not_a_hard_promotion(monkeypatch):
 
     results = task.execute("ordinary query", top_k=5)
 
-    # Candidate 7 receives Qwen's highest match score, but it cannot leapfrog
-    # candidate 0 merely because it crosses a tuned threshold.
+    # Qwen's own ranking is only an equal RRF source; it cannot promote a
+    # candidate solely because a threshold was crossed.
     assert results[0]["faiss_idx"] == 0
-    matched = next(candidate for candidate in results if candidate["faiss_idx"] == 7)
-    assert matched["qwen_match_score"] == 3
-    assert "qwen_visual_evidence" in matched["source_ranks"]
+    # The Qwen pool is stratified by video; it does not receive an implicit
+    # right to inspect every candidate or hard-promote a score threshold.
+    assert results[0]["faiss_idx"] != 7
     assert len(qwen.calls) == 4
 
 
@@ -137,4 +137,6 @@ def test_qwen_analysis_failure_falls_back_to_clip(monkeypatch):
 
     results = task.execute("ordinary query", top_k=5)
 
-    assert [candidate["faiss_idx"] for candidate in results] == [0, 1, 2, 3, 4]
+    # With no Qwen analysis, frame order follows video-first D'Hondt coverage
+    # rather than the old all-frame global ranking.
+    assert [candidate["faiss_idx"] for candidate in results] == [0, 3, 6, 9, 1]

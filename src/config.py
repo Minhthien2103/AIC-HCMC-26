@@ -58,10 +58,14 @@ MEDIA_INFO_ARCHIVE_URL = "https://aic-data.ledo.io.vn/media-info-aic25-b1.zip"
 E5_MODEL_NAME = "intfloat/multilingual-e5-base"
 
 KIS_DUAL_CANDIDATE_BUDGET = 1000
-KIS_OCR_CANDIDATE_BUDGET = 300
-KIS_TEXT_FRAMES_PER_VIDEO = 5
+KIS_OCR_CANDIDATE_BUDGET = 384
+KIS_TEXT_FRAMES_PER_VIDEO = 48  # compatibility alias for local frame budget
 KIS_REVIEW_TOP_K = 20
-KIS_QWEN_RERANK_TOP_K = 100
+KIS_QWEN_RERANK_TOP_K = 192
+KIS_VIDEO_BUDGET = 24
+KIS_LOCAL_FRAME_BUDGET = 48
+KIS_QUERY_VARIANT_LIMIT = 4
+FRAME_NEIGHBORHOOD_COUNT = 7
 
 # ── Temporal search ───────────────────────────────────────────────────────────
 TEMPORAL_WINDOW = 20
@@ -83,6 +87,15 @@ VQA_MAX_ANSWER_CHARS = 100
 VQA_ENABLE_EXTERNAL_SEARCH = False
 VQA_MAX_CANDIDATES = 100
 VQA_VERIFY_CANDIDATES = True
+VQA_VIDEO_BUDGET = 12
+VQA_LOCAL_FRAME_BUDGET = 48
+VQA_QWEN_CANDIDATE_BUDGET = 24
+
+# TRAKE is evaluated as a sequence, but only explicit temporal relations in
+# the query are constraints.  Events otherwise may occur at arbitrary frame
+# positions in a video.
+TRAKE_EVENT_TOP_K = 16
+TRAKE_QWEN_PER_EVENT = 6
 
 
 def keyframe_path(video_id: str, keyframe_name: str) -> Path:

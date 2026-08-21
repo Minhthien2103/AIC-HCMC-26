@@ -57,8 +57,6 @@ def validate_rows(rows: list[list[str]], spec: QuerySpec, max_rows: int = 100) -
                 trake_frames = [normalize_frame_id(value) for value in row[1:]]
                 if len(trake_frames) != len(spec.events):
                     errors.append(prefix + f"expected {len(spec.events)} TRAKE frames")
-                if any(left >= right for left, right in zip(trake_frames, trake_frames[1:])):
-                    errors.append(prefix + "TRAKE frame IDs must increase strictly")
             except ValueError as exc:
                 errors.append(prefix + str(exc))
 

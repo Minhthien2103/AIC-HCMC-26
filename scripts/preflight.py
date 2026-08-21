@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
+import tempfile
 from importlib.metadata import version
 from pathlib import Path
 
@@ -16,7 +19,79 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="Qwen/Qwen2-VL-7B-Instruct")
     parser.add_argument("--skip-model", action="store_true")
+    parser.add_argument("--repo-root", type=Path, default=ROOT)
+    parser.add_argument("--kis-profile", choices=("fast", "full"), default="fast")
+    parser.add_argument("--min-free-gb", type=float, default=8.0)
+    parser.add_argument("--offline", action="store_true", help="Require all models to be present in Hugging Face cache.")
     args = parser.parse_args()
+
+    repo_root = args.repo_root.resolve()
+    if not (repo_root / "src" / "config.py").exists():
+        print(f"PREFLIGHT FAILED: invalid --repo-root {repo_root}")
+        return 1
+    sys.path.insert(0, str(repo_root))
+    from src import config
+
+    config.BASE_DIR = repo_root
+    config.DATA_DIR = repo_root / "data"
+    config.INDEX_DIR = repo_root / "indexes"
+    config.FAISS_INDEX_PATH = config.INDEX_DIR / "faiss_clip.index"
+    config.METADATA_PATH = config.INDEX_DIR / "metadata.parquet"
+    config.MEDIA_TEXT_INDEX_PATH = config.INDEX_DIR / "media_e5.index"
+    config.MEDIA_TEXT_RECORDS_PATH = config.INDEX_DIR / "media_e5_records.json"
+    config.VITH_INDEX_PATH = config.INDEX_DIR / "faiss_vith.index"
+    config.KEYFRAMES_DIR = config.DATA_DIR / "keyframes"
+
+    try:
+        with tempfile.NamedTemporaryFile(prefix="aic2026-preflight-", delete=True) as stream:
+            stream.write(b"ok")
+            stream.flush()
+        print(f"temporary directory: OK ({tempfile.gettempdir()})")
+    except Exception as exc:
+        print(f"PREFLIGHT FAILED: no writable temporary directory: {exc}")
+        return 1
+    free = shutil.disk_usage(tempfile.gettempdir()).free / (1024 ** 3)
+    print(f"temporary disk free: {free:.1f} GB")
+    if free < args.min_free_gb:
+        print(f"PREFLIGHT FAILED: temporary disk has {free:.1f} GB free; need at least {args.min_free_gb:.1f} GB. Clear /content before model loading.")
+        return 1
+    required = [config.FAISS_INDEX_PATH, config.METADATA_PATH, config.KEYFRAMES_DIR]
+    if args.kis_profile in {"fast", "full"}:
+        required.extend([config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH])
+    if args.kis_profile == "full":
+        required.append(config.VITH_INDEX_PATH)
+    missing = [path for path in required if not path.exists()]
+    if missing:
+        print("PREFLIGHT FAILED: missing profile assets: " + ", ".join(str(path) for path in missing))
+        return 1
+    print(f"KIS profile assets: {args.kis_profile} OK")
+    cache_roots = [
+        Path(value) for value in (
+            os.environ.get("HF_HUB_CACHE"),
+            str(Path(os.environ["HF_HOME"]) / "hub") if os.environ.get("HF_HOME") else None,
+            str(Path.home() / ".cache" / "huggingface" / "hub"),
+        ) if value
+    ]
+    model_dirs = (
+        "models--Qwen--Qwen2-VL-7B-Instruct",
+        "models--intfloat--multilingual-e5-base",
+        "models--facebook--mbart-large-50-many-to-many-mmt",
+    )
+    missing_models = [
+        model for model in model_dirs
+        if not any((root / model / "snapshots").exists() and any((root / model / "snapshots").iterdir()) for root in cache_roots)
+    ]
+    if missing_models:
+        message = "model cache missing: " + ", ".join(missing_models)
+        if args.offline:
+            print(f"PREFLIGHT FAILED: {message}")
+            return 1
+        print(f"PREFLIGHT WARNING: {message}; first online preparation may download them")
+    else:
+        print("model cache: Qwen/E5/mBART OK")
+    if args.offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
     import torch
 
@@ -40,7 +115,7 @@ def main() -> int:
         try:
             from src.online_pipeline.vlm_pipeline import VLMPipeline
 
-            vlm = VLMPipeline(model_name=args.model, device="cuda")
+            vlm = VLMPipeline(model_name=args.model, device="cuda", local_files_only=os.environ.get("HF_HUB_OFFLINE") == "1")
             vlm.load()
             print("Qwen2-VL model load: OK")
         except Exception as exc:

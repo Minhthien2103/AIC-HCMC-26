@@ -56,7 +56,7 @@ def test_answer_is_trimmed_at_word_boundary():
         normalize_answer("   ")
 
 
-def test_validator_rejects_header_bad_trake_and_mp4():
+def test_validator_rejects_header_and_mp4_but_allows_unordered_trake():
     spec = QuerySpec("q-trake", "trake", description="x", events=("a", "b", "c"))
     errors = validate_rows(
         [["video_id", "frame_id_1", "frame_id_2", "frame_id_3"], ["L21_V001.mp4", "10", "9", "12"]],
@@ -64,19 +64,20 @@ def test_validator_rejects_header_bad_trake_and_mp4():
     )
     assert any("header" in error for error in errors)
     assert any(".mp4" in error for error in errors)
-    assert any("increase strictly" in error for error in errors)
+    assert not any("increase strictly" in error for error in errors)
 
 
-def test_alignment_requires_all_events_and_strict_time_order():
+def test_alignment_requires_all_events_and_only_explicit_time_order():
     event_lists = [
         [{"frame_id": 10, "score": 0.9}],
         [{"frame_id": 5, "score": 0.99}, {"frame_id": 20, "score": 0.8}],
         [{"frame_id": 30, "score": 0.7}],
     ]
-    chains = align_event_candidates(event_lists)
+    chains = align_event_candidates(event_lists, temporal_edges=[(0, 1), (1, 2)])
     assert len(chains) == 1
     assert [event["frame_id"] for event in chains[0]["events"]] == [10, 20, 30]
     assert align_event_candidates(event_lists[:2] + [[]]) == []
+    assert [event["frame_id"] for event in align_event_candidates(event_lists)[0]["events"]] == [10, 5, 30]
 
 
 def test_frame_id_must_be_integer():

@@ -92,21 +92,37 @@ class VLMPipeline:
             clean_up_tokenization_spaces=False,
         )[0].strip()
 
-    def answer_question(self, image_path: str, question: str) -> str:
+    def answer_question_details(self, image_path: str, question: str) -> dict[str, Any] | None:
+        """Answer from visible evidence, returning machine-checkable confidence."""
         image = Image.open(image_path).convert("RGB")
         messages = [{
             "role": "user",
             "content": [
                 {"type": "image"},
                 {"type": "text", "text": (
-                    f"{question}\n\n"
-                    "Answer using only clearly visible information. Return only the answer, with no Markdown, "
-                    "no explanation, and no more than 100 characters. If the requested detail is not visible, "
-                    "say that it is not visible. Do not guess."
+                    "Answer this visual question using only what is visible. Return ONLY valid JSON exactly as "
+                    "{\"answer\": \"\", \"visible_evidence\": [], \"confidence\": 0}. "
+                    "confidence is an integer from 0 to 3. Use 0 when the requested fact is not visible; do not guess. "
+                    f"Question: {question}"
                 )},
             ],
         }]
-        return self._generate_text(self._prepare(messages, image), max_new_tokens=48)
+        parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=96))
+        if parsed is None or not isinstance(parsed.get("answer"), str) or isinstance(parsed.get("confidence"), bool):
+            return None
+        confidence = int(parsed["confidence"])
+        if not 0 <= confidence <= 3:
+            return None
+        return {
+            "answer": parsed["answer"].strip(),
+            "visible_evidence": self._string_list(parsed.get("visible_evidence")),
+            "confidence": confidence,
+        }
+
+    def answer_question(self, image_path: str, question: str) -> str:
+        """Compatibility wrapper used by older UI paths."""
+        details = self.answer_question_details(image_path, question)
+        return str(details.get("answer", "")) if details else ""
 
     def extract_events(self, video_desc: str) -> list[str]:
         messages = [{
@@ -150,14 +166,13 @@ class VLMPipeline:
         user asked to see in the supplied query.
         """
         prompt = (
-            "You are preparing a visual known-item video search. Return ONLY valid JSON with "
-            "keys retrieval_queries, must_have, expansions, factual_entities. All values are arrays of concise "
-            "English strings. "
-            "retrieval_queries must restate visible scenes or actions from the description. must_have must contain "
-            "only visible attributes that distinguish the target. expansions may contain a synonym or a fact "
-            "supported by the supplied offline evidence, but never invent an event. factual_entities must contain "
-            "named people, places, organisations or vehicles that could help retrieve official metadata. Do not "
-            "omit the original constraints.\n"
+            "You are preparing a visual known-item video search. Return ONLY valid JSON with keys "
+            "visual_queries, metadata_queries, ocr_queries, visible_constraints, factual_entities. Every value is "
+            "an array of concise English strings. visual_queries restate visible scenes/actions. metadata_queries "
+            "contain titles, entities, places or event names useful in official video metadata. ocr_queries contain "
+            "text likely to appear on screen. visible_constraints contain only discriminative things a frame can show. "
+            "factual_entities contains named people, places, organisations or vehicles supported by the description "
+            "or supplied offline evidence. Do not invent an event and do not omit original constraints.\n"
             f"Description: {english_query}\n"
             f"Offline evidence (possibly empty): {evidence_text[:6000]}"
         )
@@ -166,9 +181,10 @@ class VLMPipeline:
         if parsed is None:
             raise ValueError(f"KIS query analysis is not valid JSON: {raw[:200]}")
         return {
-            "retrieval_queries": self._string_list(parsed.get("retrieval_queries")),
-            "must_have": self._string_list(parsed.get("must_have")),
-            "expansions": self._string_list(parsed.get("expansions")),
+            "visual_queries": self._string_list(parsed.get("visual_queries")),
+            "metadata_queries": self._string_list(parsed.get("metadata_queries")),
+            "ocr_queries": self._string_list(parsed.get("ocr_queries")),
+            "visible_constraints": self._string_list(parsed.get("visible_constraints")),
             "factual_entities": self._string_list(parsed.get("factual_entities")),
         }
 
@@ -226,8 +242,9 @@ class VLMPipeline:
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (
             "Analyze the question and output ONLY valid JSON with keys "
-            "retrieval_description, vlm_question, paraphrases, objects_required, "
-            "needs_fact_lookup, fact_query. Do not invent facts.\n"
+            "retrieval_description, vlm_question, paraphrases, metadata_queries, ocr_queries, objects_required, "
+            "needs_fact_lookup, fact_query. metadata_queries and ocr_queries are optional retrieval text; "
+            "do not invent facts.\n"
             f"Question: {english_question}"
         )
         raw = self._text_only_generate(prompt, max_new_tokens=256)
@@ -247,6 +264,76 @@ class VLMPipeline:
             "paraphrases": [],
             "objects_required": [],
         }
+
+    def analyze_trake_query(self, description: str, events: list[str]) -> dict[str, Any]:
+        """Create independent event queries and only explicit temporal edges.
+
+        Edge indices are zero-based and are intentionally absent when the
+        source wording does not assert an order. This prevents an invented
+        chronological constraint from excluding a valid sequence.
+        """
+        prompt = (
+            "Return ONLY valid JSON with keys retrieval_queries, event_queries, temporal_edges. "
+            "retrieval_queries is an array for selecting the target video. event_queries is an array with exactly "
+            f"{len(events)} arrays, one per listed event, containing visual paraphrases. temporal_edges is an array "
+            "of [before_index, after_index] zero-based pairs ONLY where the description explicitly states before, "
+            "after, then, next, followed by, or another unambiguous temporal relation. Do not assume the numbered "
+            "event list is chronological.\n"
+            f"Description: {description}\nEvents: {json.dumps(events, ensure_ascii=False)}"
+        )
+        parsed = self._json_object(self._text_only_generate(prompt, max_new_tokens=384))
+        if parsed is None:
+            raise ValueError("TRAKE query analysis is not valid JSON")
+        raw_events = parsed.get("event_queries")
+        event_queries: list[list[str]] = []
+        if isinstance(raw_events, list):
+            for index in range(len(events)):
+                value = raw_events[index] if index < len(raw_events) else []
+                event_queries.append(self._string_list(value))
+        else:
+            event_queries = [[] for _ in events]
+        edges: list[tuple[int, int]] = []
+        for edge in parsed.get("temporal_edges", []):
+            if not isinstance(edge, list | tuple) or len(edge) != 2:
+                continue
+            try:
+                before, after = int(edge[0]), int(edge[1])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= before < len(events) and 0 <= after < len(events) and before != after and (before, after) not in edges:
+                edges.append((before, after))
+        return {
+            "retrieval_queries": self._string_list(parsed.get("retrieval_queries")),
+            "event_queries": event_queries,
+            "temporal_edges": edges,
+        }
+
+    def score_event_match_details(self, image_path: str, event: str) -> dict[str, Any] | None:
+        """Return one rankable visual-evidence vote for a TRAKE event."""
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    "Does this frame show the event below? Return ONLY valid JSON exactly as "
+                    "{\"score\": 0, \"visible_evidence\": []}. score is 0..3; use 0 if the event is not visible. "
+                    f"Event: {event}"
+                )},
+            ],
+        }]
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            parsed = self._json_object(self._generate_text(self._prepare(messages, image), max_new_tokens=48))
+            if parsed is None or isinstance(parsed.get("score"), bool):
+                return None
+            score = int(parsed["score"])
+            if not 0 <= score <= 3:
+                return None
+            return {"score": score, "visible_evidence": self._string_list(parsed.get("visible_evidence"))}
+        except Exception as exc:
+            print(f"[TRAKE] Qwen event scoring skipped for {image_path}: {exc}")
+            return None
 
     def verify_frame(self, image_path: str, retrieval_description: str) -> bool:
         messages = [{

@@ -18,6 +18,19 @@ def candidate_identity(candidate: dict[str, Any]) -> str:
     ``faiss_idx`` is the authoritative identity for the supplied index.  The
     fallback keeps this helper useful for review fixtures and future indexes.
     """
+    # A neighbourhood proposal may originate from one FAISS keyframe but
+    # represents a different original MP4 frame.  Its submitted identity is
+    # therefore video/frame, not the anchor's FAISS id.
+    if candidate.get("anchor_frame_id") is not None or candidate.get("neighborhood_rank") is not None:
+        return "frame:{video}:{frame}".format(
+            video=str(candidate.get("video_id", "")),
+            frame=str(candidate.get("frame_id", candidate.get("keyframe_name", ""))),
+        )
+    if candidate.get("events"):
+        return "sequence:{video}:{frames}".format(
+            video=str(candidate.get("video_id", "")),
+            frames=":".join(str(event.get("frame_id", "")) for event in candidate["events"]),
+        )
     if candidate.get("faiss_idx") is not None:
         return f"faiss:{int(candidate['faiss_idx'])}"
     return "frame:{video}:{frame}".format(

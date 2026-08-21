@@ -58,6 +58,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--media-info-archive", type=Path)
     parser.add_argument("--build-media-index", action="store_true")
     parser.add_argument("--build-vith-index", action="store_true")
+    parser.add_argument("--kis-profile", choices=("fast", "full"), default="fast")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--checkpoint-every", type=int, default=16)
     parser.add_argument("--resume", action="store_true")
@@ -129,7 +130,9 @@ def _metadata_records() -> list[dict[str, str]]:
 
 def build_media_index(device: str) -> None:
     records = _metadata_records()
-    encoder = E5TextEncoder(config.E5_MODEL_NAME, device=device, local_files_only=True)
+    # Asset preparation is the explicit online step. Final generation passes
+    # local_files_only/offline and therefore never downloads a model.
+    encoder = E5TextEncoder(config.E5_MODEL_NAME, device=device, local_files_only=False)
     vectors = encoder.encode_documents([record["text"] for record in records])
     index = faiss.IndexFlatIP(int(vectors.shape[1]))
     index.add(np.ascontiguousarray(vectors, dtype=np.float32))
@@ -283,7 +286,12 @@ def build_evidence_cache(args: argparse.Namespace) -> None:
             continue
         english = translate_vi_to_en(spec.description)
         analysis = vlm.analyze_kis_query(english)
-        queries = list(dict.fromkeys([english, *analysis.get("retrieval_queries", []), *analysis.get("factual_entities", [])]))
+        queries = list(dict.fromkeys([
+            english,
+            *analysis.get("visual_queries", []),
+            *analysis.get("metadata_queries", []),
+            *analysis.get("factual_entities", []),
+        ]))
         documents: list[dict[str, str]] = []
         for query in queries[:4]:
             try:
@@ -304,24 +312,28 @@ def build_evidence_cache(args: argparse.Namespace) -> None:
 
 
 def smoke_test(device: str, args: argparse.Namespace) -> None:
-    """Exercise every final KIS source using the actual prepared assets."""
+    """Exercise every selected KIS profile source using actual local assets."""
     specs = _load_specs(args)
     query = next((spec.description for spec in specs if spec.query_type == "kis"), "")
     if not query:
         raise RuntimeError("Smoke test needs at least one KIS query in the manifest")
     baseline_encoder = QueryEncoder(config.CLIP_MODEL_NAME, config.CLIP_PRETRAINED, device=device)
     baseline = RetrievalEngine(config.BASE_DIR / "indexes" / "faiss_clip.index", config.METADATA_PATH)
-    vith_encoder = QueryEncoder(config.VITH_MODEL_NAME, config.VITH_PRETRAINED, device=device)
-    vith = RetrievalEngine(config.VITH_INDEX_PATH, config.METADATA_PATH)
-    if baseline.index is None or vith.index is None:
-        raise RuntimeError("Smoke test requires both baseline and ViT-H indices")
+    if baseline.index is None:
+        raise RuntimeError("Smoke test requires the baseline ViT-B index")
     e5 = E5TextEncoder(config.E5_MODEL_NAME, device=device, local_files_only=True)
     media = MediaTextRetriever(config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH, e5)
     clip_rows = baseline.search(baseline_encoder.encode_text(query), top_k=5)
-    vith_rows = vith.search(vith_encoder.encode_text(query), top_k=5)
     media_rows = media.search(query, top_k=5)
-    if not clip_rows or not vith_rows or not media_rows:
-        raise RuntimeError("Dual retrieval smoke test returned an empty source")
+    if not clip_rows or not media_rows:
+        raise RuntimeError("Fast retrieval smoke test returned an empty source")
+    vith_rows = []
+    if args.kis_profile == "full":
+        vith_encoder = QueryEncoder(config.VITH_MODEL_NAME, config.VITH_PRETRAINED, device=device)
+        vith = RetrievalEngine(config.VITH_INDEX_PATH, config.METADATA_PATH)
+        vith_rows = vith.search(vith_encoder.encode_text(query), top_k=5)
+        if not vith_rows:
+            raise RuntimeError("Full profile smoke test returned no ViT-H candidates")
     ocr = CandidateOCR(config.INDEX_DIR / "ocr_cache", e5)
     image_path = config.keyframe_path(clip_rows[0]["video_id"], clip_rows[0]["keyframe_name"])
     first_text = ocr.text(image_path)
@@ -332,8 +344,8 @@ def smoke_test(device: str, args: argparse.Namespace) -> None:
     if first_text != second_text:
         raise RuntimeError("OCR cache hit changed the extracted text")
     LOGGER.info(
-        "KIS smoke passed: ViT-B=%s, ViT-H=%s, media=%s, OCR cache=%s",
-        clip_rows[0]["video_id"], vith_rows[0]["video_id"], media_rows[0]["video_id"], cache_path.name,
+        "KIS %s smoke passed: ViT-B=%s, ViT-H=%s, media=%s, OCR cache=%s",
+        args.kis_profile, clip_rows[0]["video_id"], vith_rows[0]["video_id"] if vith_rows else "disabled", media_rows[0]["video_id"], cache_path.name,
     )
 
 

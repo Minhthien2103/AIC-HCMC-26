@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src import config  # noqa: E402
 from src.online_pipeline.object_filter import ObjectFilter  # noqa: E402
+from src.online_pipeline.frame_neighborhood import FrameNeighborhood  # noqa: E402
 from src.online_pipeline.query_encoder import QueryEncoder  # noqa: E402
 from src.online_pipeline.retrieval import RetrievalEngine  # noqa: E402
 from src.online_pipeline.text_evidence import (  # noqa: E402
@@ -55,6 +56,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--vqa-top-k", type=int, default=100)
     parser.add_argument("--trake-top-k", type=int, default=100)
     parser.add_argument("--trake-top-videos", type=int, default=10)
+    parser.add_argument("--trake-event-top-k", type=int, default=config.TRAKE_EVENT_TOP_K)
+    parser.add_argument("--trake-qwen-per-event", type=int, default=config.TRAKE_QWEN_PER_EVENT)
     parser.add_argument(
         "--disable-kis-qwen",
         action="store_true",
@@ -64,12 +67,18 @@ def _parse_args() -> argparse.Namespace:
         "--kis-vlm-top-k",
         type=int,
         default=config.KIS_QWEN_RERANK_TOP_K,
-        help="Maximum KIS candidates visually scored by Qwen2-VL (1-100).",
+        help="Maximum stratified KIS candidates visually scored by Qwen2-VL.",
+    )
+    parser.add_argument(
+        "--kis-profile",
+        choices=("fast", "full"),
+        default="fast",
+        help="fast=ViT-B+media-E5+OCR+Qwen; full additionally requires ViT-H.",
     )
     parser.add_argument(
         "--enable-kis-dual",
         action="store_true",
-        help="Use ViT-H/14, BTC media E5 and candidate OCR alongside the ViT-B baseline.",
+        help="Deprecated alias for --kis-profile full.",
     )
     parser.add_argument(
         "--require-kis-assets",
@@ -83,8 +92,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-kis-ocr", action="store_true")
     parser.add_argument("--kis-candidate-budget", type=int, default=config.KIS_DUAL_CANDIDATE_BUDGET)
     parser.add_argument("--kis-ocr-candidate-budget", type=int, default=config.KIS_OCR_CANDIDATE_BUDGET)
-    parser.add_argument("--kis-text-frames-per-video", type=int, default=config.KIS_TEXT_FRAMES_PER_VIDEO)
-    parser.add_argument("--review-output-dir", type=Path, help="Write KIS top-20 contact sheets and provenance here.")
+    parser.add_argument("--kis-video-budget", type=int, default=config.KIS_VIDEO_BUDGET)
+    parser.add_argument("--kis-local-frame-budget", type=int, default=config.KIS_LOCAL_FRAME_BUDGET)
+    parser.add_argument("--kis-query-variant-limit", type=int, default=config.KIS_QUERY_VARIANT_LIMIT)
+    parser.add_argument("--kis-text-frames-per-video", type=int, help="Deprecated alias for --kis-local-frame-budget.")
+    parser.add_argument("--frame-neighborhood-count", type=int, default=config.FRAME_NEIGHBORHOOD_COUNT)
+    parser.add_argument("--review-output-dir", type=Path, help="Write top-20 review contact sheets and provenance for all query types here.")
     parser.add_argument("--review-manifest", type=Path, help="JSON pin/keep/reject decisions for generated candidates.")
     parser.add_argument("--review-top-k", type=int, default=config.KIS_REVIEW_TOP_K)
     parser.add_argument("--provenance-dir", type=Path, help="Directory for reproducibility metadata (default next to ZIP).")
@@ -139,6 +152,7 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
     if retriever.index is None or retriever.meta_df is None:
         raise RuntimeError("FAISS index and metadata are required before generating a submission")
     object_filter = ObjectFilter(config.OBJECTS_PATH)
+    frame_neighborhood = FrameNeighborhood(retriever.meta_df)
 
     needs_vqa = any(spec.query_type == "qa" for spec in specs)
     needs_trake = any(spec.query_type == "trake" for spec in specs)
@@ -165,30 +179,36 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
     secondary_retrievers = {}
     media_retriever = None
     ocr = None
-    if args.enable_kis_dual and has_kis:
-        missing_assets = [
-            path for path in (config.VITH_INDEX_PATH, config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH)
-            if not path.exists()
-        ]
-        if missing_assets:
-            message = "KIS dual assets are missing: " + ", ".join(str(path) for path in missing_assets)
+    # Fast profile is fully useful without the expensive ViT-H index.  Media
+    # E5/OCR are shared with QA/TRAKE when the prepared BTC assets exist.
+    e5_missing = [path for path in (config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH) if not path.exists()]
+    e5_encoder = None
+    if not e5_missing:
+        e5_encoder = E5TextEncoder(config.E5_MODEL_NAME, device=args.device, local_files_only=args.offline)
+        if args.require_kis_assets:
+            e5_encoder.encode_queries(["asset availability check"])
+        media_retriever = MediaTextRetriever(config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH, e5_encoder)
+        if not args.disable_kis_ocr:
+            ocr = CandidateOCR(args.ocr_cache_dir or (config.INDEX_DIR / "ocr_cache"), e5_encoder)
+    elif has_kis:
+        message = "Fast KIS media-E5 assets are missing: " + ", ".join(str(path) for path in e5_missing)
+        if args.require_kis_assets:
+            raise FileNotFoundError(message)
+        LOGGER.warning("%s; retaining ViT-B/Qwen retrieval", message)
+
+    if args.kis_profile == "full" and has_kis:
+        if not config.VITH_INDEX_PATH.exists():
+            message = f"KIS full profile requires ViT-H index: {config.VITH_INDEX_PATH}"
             if args.require_kis_assets:
                 raise FileNotFoundError(message)
-            LOGGER.warning("%s; using the ViT-B baseline only", message)
+            LOGGER.warning("%s; falling back to fast profile", message)
+            args.kis_profile = "fast"
         else:
             vith_encoder = QueryEncoder(config.VITH_MODEL_NAME, config.VITH_PRETRAINED, device=args.device)
             vith_retriever = RetrievalEngine(config.VITH_INDEX_PATH, config.METADATA_PATH)
             if vith_retriever.index is None or vith_retriever.meta_df is None:
                 raise RuntimeError("ViT-H index exists but could not be loaded")
-            e5_encoder = E5TextEncoder(config.E5_MODEL_NAME, device=args.device, local_files_only=True)
-            if args.require_kis_assets:
-                # Force an immediate, local-only E5 load so final mode does
-                # not discover a missing model after expensive CLIP/Qwen work.
-                e5_encoder.encode_queries(["asset availability check"])
             secondary_retrievers["clip_vith14"] = (vith_encoder, vith_retriever)
-            media_retriever = MediaTextRetriever(config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH, e5_encoder)
-            if not args.disable_kis_ocr:
-                ocr = CandidateOCR(args.ocr_cache_dir or (config.INDEX_DIR / "ocr_cache"), e5_encoder)
 
     kis = KIStask(
         encoder,
@@ -203,10 +223,14 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
         evidence_cache=evidence_cache,
         candidate_budget=args.kis_candidate_budget,
         ocr_candidate_budget=args.kis_ocr_candidate_budget,
-        text_frames_per_video=args.kis_text_frames_per_video,
+        frame_neighborhood=frame_neighborhood,
+        video_budget=args.kis_video_budget,
+        local_frame_budget=args.kis_local_frame_budget,
+        query_variant_limit=args.kis_query_variant_limit,
+        neighborhood_count=args.frame_neighborhood_count,
         strict_sources=args.require_kis_assets,
     )
-    trake = TrakeTask(encoder, retriever, vlm_pipeline=vlm) if needs_trake else None
+    trake = TrakeTask(encoder, retriever, vlm_pipeline=vlm, media_retriever=media_retriever, ocr=ocr, frame_neighborhood=frame_neighborhood) if needs_trake else None
 
     vqa = None
     if needs_vqa:
@@ -225,6 +249,9 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
             object_filter=object_filter,
             vlm_pipeline=vlm,
             semantic_filter=semantic_filter,
+            media_retriever=media_retriever,
+            ocr=ocr,
+            frame_neighborhood=frame_neighborhood,
         )
     return kis, vqa, trake
 
@@ -263,6 +290,16 @@ def _generate_for_query(spec: QuerySpec, tasks, args: argparse.Namespace) -> lis
             top_k=min(args.vqa_top_k, args.max_rows),
             allow_external_search=args.allow_external_search,
         )
+        if args.review_output_dir is not None:
+            review_dir = write_review_assets(
+                spec.query_id,
+                results,
+                args.review_output_dir,
+                image_path_for=lambda item: config.keyframe_path(item["video_id"], item["keyframe_name"]),
+                limit=args.review_top_k,
+            )
+            LOGGER.info("%s: wrote review artefacts to %s", spec.query_id, review_dir)
+        results = apply_review(results, spec.query_id, args.review_manifest, limit=args.review_top_k)
         rows = []
         for result in results:
             try:
@@ -282,8 +319,21 @@ def _generate_for_query(spec: QuerySpec, tasks, args: argparse.Namespace) -> lis
         spec.description,
         list(spec.events),
         top_videos=args.trake_top_videos,
+        event_top_k=args.trake_event_top_k,
         max_sequences=min(args.trake_top_k, args.max_rows),
+        qwen_per_event=args.trake_qwen_per_event,
+        neighborhood_count=args.frame_neighborhood_count,
     )
+    if args.review_output_dir is not None:
+        review_dir = write_review_assets(
+            spec.query_id,
+            results,
+            args.review_output_dir,
+            image_path_for=lambda item: config.keyframe_path(item["video_id"], item["keyframe_name"]),
+            limit=args.review_top_k,
+        )
+        LOGGER.info("%s: wrote review artefacts to %s", spec.query_id, review_dir)
+    results = apply_review(results, spec.query_id, args.review_manifest, limit=args.review_top_k)
     rows = []
     for result in results:
         try:
@@ -329,10 +379,17 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
         },
         "config": {
             "offline": args.offline,
-            "enable_kis_dual": args.enable_kis_dual,
+            "kis_profile": args.kis_profile,
+            "enable_kis_dual_alias": args.enable_kis_dual,
             "candidate_budget": args.kis_candidate_budget,
             "ocr_candidate_budget": args.kis_ocr_candidate_budget,
-            "qwen_top_k": args.kis_vlm_top_k,
+            "video_budget": args.kis_video_budget,
+            "local_frame_budget": args.kis_local_frame_budget,
+            "query_variant_limit": args.kis_query_variant_limit,
+            "qwen_budget": args.kis_vlm_top_k,
+            "frame_neighborhood_count": args.frame_neighborhood_count,
+            "trake_event_top_k": args.trake_event_top_k,
+            "trake_qwen_per_event": args.trake_qwen_per_event,
             "rrf_k": config.KIS_RRF_K,
             "review_top_k": args.review_top_k,
         },
@@ -353,13 +410,27 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
 
 def main() -> int:
     args = _parse_args()
+    if args.enable_kis_dual:
+        args.kis_profile = "full"
+    if args.kis_text_frames_per_video is not None:
+        args.kis_local_frame_budget = args.kis_text_frames_per_video
     if not 1 <= args.max_rows <= 100:
         raise SystemExit("--max-rows must be between 1 and 100")
     if not 1 <= args.vqa_top_k <= 100 or not 1 <= args.trake_top_k <= 100:
         raise SystemExit("--vqa-top-k and --trake-top-k must be between 1 and 100")
-    if not 1 <= args.kis_vlm_top_k <= 100:
-        raise SystemExit("--kis-vlm-top-k must be between 1 and 100")
-    if min(args.kis_candidate_budget, args.kis_ocr_candidate_budget, args.kis_text_frames_per_video, args.review_top_k) < 1:
+    if args.kis_vlm_top_k < 1:
+        raise SystemExit("--kis-vlm-top-k must be positive")
+    if min(
+        args.kis_candidate_budget,
+        args.kis_ocr_candidate_budget,
+        args.kis_video_budget,
+        args.kis_local_frame_budget,
+        args.kis_query_variant_limit,
+        args.frame_neighborhood_count,
+        args.trake_event_top_k,
+        args.trake_qwen_per_event,
+        args.review_top_k,
+    ) < 1:
         raise SystemExit("KIS candidate/review budgets must be positive")
     if args.offline and args.allow_external_search:
         raise SystemExit("--offline and --allow-external-search cannot be used together")
@@ -389,7 +460,7 @@ def main() -> int:
     if args.review_output_dir is not None:
         template = write_review_manifest_template(
             args.review_output_dir,
-            [spec.query_id for spec in specs if spec.query_type == "kis"],
+            [spec.query_id for spec in specs],
         )
         LOGGER.info("Wrote editable review template %s", template)
     LOGGER.info("Wrote reproducibility record %s", _write_provenance(args, specs))
