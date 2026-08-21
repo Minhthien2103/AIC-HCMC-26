@@ -61,6 +61,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-rows", type=int, default=100)
     parser.add_argument("--vqa-top-k", type=int, default=100)
+    parser.add_argument(
+        "--vqa-qwen-candidate-budget",
+        type=int,
+        default=config.VQA_QWEN_CANDIDATE_BUDGET,
+        help="Maximum video-stratified QA frames inspected by Qwen2-VL.",
+    )
     parser.add_argument("--trake-top-k", type=int, default=100)
     parser.add_argument("--trake-top-videos", type=int, default=10)
     parser.add_argument("--trake-event-top-k", type=int, default=config.TRAKE_EVENT_TOP_K)
@@ -273,6 +279,8 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
             media_retriever=media_retriever,
             ocr=ocr,
             frame_neighborhood=frame_neighborhood,
+            qwen_candidate_budget=args.vqa_qwen_candidate_budget,
+            neighborhood_count=args.frame_neighborhood_count,
         )
     return kis, vqa, trake
 
@@ -408,6 +416,7 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
             "local_frame_budget": args.kis_local_frame_budget,
             "query_variant_limit": args.kis_query_variant_limit,
             "qwen_budget": args.kis_vlm_top_k,
+            "vqa_qwen_candidate_budget": args.vqa_qwen_candidate_budget,
             "vlm_mode": args.vlm_mode,
             "frame_neighborhood_count": args.frame_neighborhood_count,
             "trake_event_top_k": args.trake_event_top_k,
@@ -449,6 +458,7 @@ def main() -> int:
         args.kis_local_frame_budget,
         args.kis_query_variant_limit,
         args.frame_neighborhood_count,
+        args.vqa_qwen_candidate_budget,
         args.trake_event_top_k,
         args.trake_qwen_per_event,
         args.review_top_k,

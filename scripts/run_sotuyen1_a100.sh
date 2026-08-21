@@ -22,6 +22,7 @@ case "$PROFILE" in
     KIS_LOCAL_FRAME_BUDGET=48
     KIS_QUERY_VARIANT_LIMIT=3
     NEIGHBORHOOD_COUNT=7
+    VQA_QWEN_CANDIDATE_BUDGET=96
     TRAKE_TOP_VIDEOS=5
     TRAKE_EVENT_TOP_K=16
     TRAKE_QWEN_PER_EVENT=4
@@ -32,6 +33,7 @@ case "$PROFILE" in
     KIS_LOCAL_FRAME_BUDGET=32
     KIS_QUERY_VARIANT_LIMIT=2
     NEIGHBORHOOD_COUNT=5
+    VQA_QWEN_CANDIDATE_BUDGET=48
     TRAKE_TOP_VIDEOS=4
     TRAKE_EVENT_TOP_K=12
     TRAKE_QWEN_PER_EVENT=3
@@ -73,6 +75,7 @@ time python -u scripts/generate_submission.py \
   --kis-query-variant-limit "$KIS_QUERY_VARIANT_LIMIT" \
   --frame-neighborhood-count "$NEIGHBORHOOD_COUNT" \
   --vqa-top-k 100 \
+  --vqa-qwen-candidate-budget "$VQA_QWEN_CANDIDATE_BUDGET" \
   --trake-top-k 100 \
   --trake-top-videos "$TRAKE_TOP_VIDEOS" \
   --trake-event-top-k "$TRAKE_EVENT_TOP_K" \

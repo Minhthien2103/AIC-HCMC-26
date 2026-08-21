@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from src import config
@@ -13,7 +14,20 @@ from src.utils.translation import translate_vi_to_en
 class VQATask:
     """Select videos by ranked evidence before asking Qwen for an answer."""
 
-    def __init__(self, encoder, retriever, object_filter=None, vlm_pipeline=None, semantic_filter=None, *, media_retriever=None, ocr=None, frame_neighborhood=None):
+    def __init__(
+        self,
+        encoder,
+        retriever,
+        object_filter=None,
+        vlm_pipeline=None,
+        semantic_filter=None,
+        *,
+        media_retriever=None,
+        ocr=None,
+        frame_neighborhood=None,
+        qwen_candidate_budget: int | None = None,
+        neighborhood_count: int | None = None,
+    ):
         self.encoder = encoder
         self.retriever = retriever
         self.object_filter = object_filter  # no longer boosts VQA ranking
@@ -22,6 +36,8 @@ class VQATask:
         self.media_retriever = media_retriever
         self.ocr = ocr
         self.frame_neighborhood = frame_neighborhood
+        self.qwen_candidate_budget = int(qwen_candidate_budget or config.VQA_QWEN_CANDIDATE_BUDGET)
+        self.neighborhood_count = int(neighborhood_count or config.FRAME_NEIGHBORHOOD_COUNT)
 
     @staticmethod
     def _unique(values: list[str]) -> list[str]:
@@ -126,8 +142,9 @@ class VQATask:
                 candidate["video_source_frame_ranks"] = dict(evidence["video_source_frame_ranks"])
             candidate.setdefault("anchor_frame_id", int(candidate["frame_id"]))
         grouped = self._by_video(local, ids)
-        answer_pool = stratified_candidates(grouped, videos, limit=config.VQA_QWEN_CANDIDATE_BUDGET)
+        answer_pool = stratified_candidates(grouped, videos, limit=self.qwen_candidate_budget)
         answered: list[dict[str, Any]] = []
+        uncertain: list[dict[str, Any]] = []
         for index, candidate in enumerate(answer_pool, start=1):
             item = candidate.copy()
             item["answer_error"] = ""
@@ -143,17 +160,48 @@ class VQATask:
             if not details:
                 continue
             answer = str(details.get("answer") or "").strip()
-            if not answer or int(details.get("confidence", 0)) <= 0:
+            if not answer:
                 continue
             item["answer"] = answer
             item["visible_evidence"] = list(details.get("visible_evidence") or [])
             item["answer_confidence"] = int(details.get("confidence", 0))
             item["answer_input_rank"] = index
-            answered.append(item)
-            if progress_callback:
+            if item["answer_confidence"] > 0:
+                answered.append(item)
+            else:
+                uncertain.append(item)
+            if progress_callback and item["answer_confidence"] > 0:
                 progress_callback(len(answered), top_k)
+        if not answered and uncertain:
+            # A low-confidence, non-empty answer is still preferable to
+            # aborting the complete 25-query batch. Rank repeated answers
+            # first so independent frames can corroborate one another.
+            agreement = Counter(str(item["answer"]).casefold() for item in uncertain)
+            uncertain.sort(
+                key=lambda item: (
+                    -agreement[str(item["answer"]).casefold()],
+                    -float(item.get("score", 0.0)),
+                    int(item["answer_input_rank"]),
+                )
+            )
+            answered = uncertain
+            print(f"[VQA] no positive-confidence answer; using {len(uncertain)} non-empty best-effort answers")
+        elif not answered and answer_pool:
+            # Keep the output contract complete even when Qwen rejects every
+            # retrieved frame. The explicit marker is valid CSV content and
+            # the retrieval candidate remains available for manual review.
+            fallback = answer_pool[0].copy()
+            fallback.update({
+                "answer": "Không xác định",
+                "visible_evidence": [],
+                "answer_confidence": 0,
+                "answer_input_rank": 1,
+                "answer_error": "no non-empty Qwen answer",
+            })
+            answered = [fallback]
+            print("[VQA] WARNING: all Qwen answers were empty; emitting one retrieval-only fallback row")
         # Do not let a generic/not-visible fallback silently occupy rank one.
         answered.sort(key=lambda item: (-int(item["answer_confidence"]), -float(item.get("score", 0.0)), int(item["answer_input_rank"])))
         if self.frame_neighborhood is not None:
-            answered = self.frame_neighborhood.expand_ranked(answered, count=config.FRAME_NEIGHBORHOOD_COUNT)
+            answered = self.frame_neighborhood.expand_ranked(answered, count=self.neighborhood_count)
         return answered[:top_k], analysis
