@@ -44,10 +44,24 @@ OBJECT_BOOST_WEIGHT = 0.3
 # ── KIS GPU retrieval / re-ranking ─────────────────────────────────────────
 # These values are intentionally configurable rather than hidden inside the
 # task implementation, so trial submissions can be reproduced and ablated.
-KIS_CANDIDATES_PER_VARIANT = 600
 KIS_RRF_K = 60
-KIS_VLM_TOP_K = 50
-KIS_VLM_PROMOTE_MIN_SCORE = 2
+
+# ── KIS dual-retrieval assets ──────────────────────────────────────────────
+# All values are exposed as CLI defaults rather than semantic query rules.
+VITH_MODEL_NAME = "ViT-H-14"
+VITH_PRETRAINED = "laion2b_s32b_b79k"
+VITH_INDEX_PATH = INDEX_DIR / "faiss_vith.index"
+VITH_FEATURES_PATH = INDEX_DIR / "vith_features.f16.npy"
+MEDIA_TEXT_INDEX_PATH = INDEX_DIR / "media_e5.index"
+MEDIA_TEXT_RECORDS_PATH = INDEX_DIR / "media_e5_records.json"
+MEDIA_INFO_ARCHIVE_URL = "https://aic-data.ledo.io.vn/media-info-aic25-b1.zip"
+E5_MODEL_NAME = "intfloat/multilingual-e5-base"
+
+KIS_DUAL_CANDIDATE_BUDGET = 1000
+KIS_OCR_CANDIDATE_BUDGET = 300
+KIS_TEXT_FRAMES_PER_VIDEO = 5
+KIS_REVIEW_TOP_K = 20
+KIS_QWEN_RERANK_TOP_K = 100
 
 # ── Temporal search ───────────────────────────────────────────────────────────
 TEMPORAL_WINDOW = 20

@@ -109,15 +109,19 @@ def test_kis_does_not_trigger_temporal_and_keeps_baseline(monkeypatch):
     assert sum(result["video_id"] == "V0" for result in results) == 8
 
 
-def test_qwen_promotes_visual_match_and_preserves_clip_fallback(monkeypatch):
+def test_qwen_is_an_equal_evidence_source_not_a_hard_promotion(monkeypatch):
     qwen = _Qwen()
     task = KIStask(_Encoder(), _Retriever(), vlm_pipeline=qwen, enable_qwen=True, vlm_top_k=4)
     monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
 
     results = task.execute("ordinary query", top_k=5)
 
-    assert results[0]["faiss_idx"] == 7
-    assert {candidate["faiss_idx"] for candidate in results[1:]} >= {0, 1}
+    # Candidate 7 receives Qwen's highest match score, but it cannot leapfrog
+    # candidate 0 merely because it crosses a tuned threshold.
+    assert results[0]["faiss_idx"] == 0
+    matched = next(candidate for candidate in results if candidate["faiss_idx"] == 7)
+    assert matched["qwen_match_score"] == 3
+    assert "qwen_visual_evidence" in matched["source_ranks"]
     assert len(qwen.calls) == 4
 
 

@@ -22,6 +22,19 @@ def test_query_parser_supports_qa_blocks_and_trake_events(tmp_path: Path):
     assert specs[1].events == ("Starts walking", "Reaches the door")
 
 
+def test_query_parser_extracts_inline_numbered_trake_events(tmp_path: Path):
+    (tmp_path / "query-4-trake.txt").write_text(
+        "Tìm 4 khoảnh khắc chính khi vận động viên thực hiện cú nhảy: "
+        "(1) giậm nhảy, (2) bay qua xà, (3) tiếp đất, (4) đứng dậy.",
+        encoding="utf-8",
+    )
+
+    specs = load_query_specs(queries_dir=tmp_path)
+
+    assert specs[0].description == "Tìm 4 khoảnh khắc chính khi vận động viên thực hiện cú nhảy"
+    assert specs[0].events == ("giậm nhảy", "bay qua xà", "tiếp đất", "đứng dậy")
+
+
 def test_query_parser_manifest(tmp_path: Path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"queries": [{

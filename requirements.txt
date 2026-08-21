@@ -25,12 +25,13 @@ transformers>=4.45.0,<5.0.0
 accelerate>=0.34.0
 sentencepiece
 bitsandbytes>=0.46.1
+sentence-transformers>=3.0.0
+paddleocr>=3.0.0
+duckduckgo-search>=6.0.0
 
 # Development / validation
 pytest>=8.0.0
 
 # Optional VQA enhancements (the code falls back when these are absent):
-# duckduckgo-search
 # spacy
-# sentence-transformers
 # After installing spaCy, optionally download: python -m spacy download en_core_web_sm

@@ -12,9 +12,16 @@ from PIL import Image
 
 
 class VLMPipeline:
-    def __init__(self, model_name: str = "Qwen/Qwen2-VL-7B-Instruct", device: str | None = None):
+    def __init__(
+        self,
+        model_name: str = "Qwen/Qwen2-VL-7B-Instruct",
+        device: str | None = None,
+        *,
+        local_files_only: bool = False,
+    ):
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.local_files_only = local_files_only
         self.model = None
         self.processor = None
 
@@ -46,8 +53,9 @@ class VLMPipeline:
             device_map="auto",
             torch_dtype=torch.float16,
             attn_implementation="sdpa",
+            local_files_only=self.local_files_only,
         )
-        self.processor = AutoProcessor.from_pretrained(self.model_name)
+        self.processor = AutoProcessor.from_pretrained(self.model_name, local_files_only=self.local_files_only)
         self.model.eval()
         print("VLM loaded successfully!")
 
@@ -134,15 +142,24 @@ class VLMPipeline:
             text for text in (str(item).strip() for item in value) if text
         ))
 
-    def analyze_kis_query(self, english_query: str) -> dict[str, list[str]]:
-        """Produce additive visual retrieval hints without replacing the query."""
+    def analyze_kis_query(self, english_query: str, *, evidence_text: str = "") -> dict[str, list[str]]:
+        """Produce additive retrieval constraints without replacing the query.
+
+        ``evidence_text`` is read from an offline cache prepared before the
+        final run. It may clarify named entities, but never overrides what the
+        user asked to see in the supplied query.
+        """
         prompt = (
             "You are preparing a visual known-item video search. Return ONLY valid JSON with "
-            "keys retrieval_queries, must_have, expansions. All values are arrays of concise English strings. "
+            "keys retrieval_queries, must_have, expansions, factual_entities. All values are arrays of concise "
+            "English strings. "
             "retrieval_queries must restate visible scenes or actions from the description. must_have must contain "
             "only visible attributes that distinguish the target. expansions may contain a synonym or a fact "
-            "reliably implied by the description, but never invent an event. Do not omit the original constraints.\n"
-            f"Description: {english_query}"
+            "supported by the supplied offline evidence, but never invent an event. factual_entities must contain "
+            "named people, places, organisations or vehicles that could help retrieve official metadata. Do not "
+            "omit the original constraints.\n"
+            f"Description: {english_query}\n"
+            f"Offline evidence (possibly empty): {evidence_text[:6000]}"
         )
         raw = self._text_only_generate(prompt, max_new_tokens=256)
         parsed = self._json_object(raw)
@@ -152,15 +169,16 @@ class VLMPipeline:
             "retrieval_queries": self._string_list(parsed.get("retrieval_queries")),
             "must_have": self._string_list(parsed.get("must_have")),
             "expansions": self._string_list(parsed.get("expansions")),
+            "factual_entities": self._string_list(parsed.get("factual_entities")),
         }
 
-    def score_kis_match(
+    def score_kis_match_details(
         self,
         image_path: str,
         original_query: str,
         must_have: list[str],
-    ) -> int | None:
-        """Return a conservative 0--3 visual match score, or None on failure."""
+    ) -> dict[str, Any] | None:
+        """Return Qwen visual evidence used as one rank-fusion source."""
         criteria = "\n".join(f"- {item}" for item in must_have) or "- Use the original description."
         messages = [{
             "role": "user",
@@ -168,10 +186,11 @@ class VLMPipeline:
                 {"type": "image"},
                 {"type": "text", "text": (
                     "Score how well this image matches the visual known-item search below. "
-                    "Return ONLY valid JSON exactly like {\"score\": 0}. "
+                    "Return ONLY valid JSON exactly like {\"score\": 0, \"visible_requirements\": []}. "
                     "Use 0 for unrelated/contradicted, 1 for only broad context, 2 for most visible "
                     "requirements, and 3 for all visible requirements. Do not infer details that cannot "
-                    "be seen in the image.\n"
+                    "be seen in the image. visible_requirements must list only requirements directly visible in "
+                    "this image.\n"
                     f"Original description: {original_query}\n"
                     f"Visible requirements:\n{criteria}"
                 )},
@@ -184,10 +203,25 @@ class VLMPipeline:
             if parsed is None or isinstance(parsed.get("score"), bool):
                 return None
             score = int(parsed["score"])
-            return score if 0 <= score <= 3 else None
+            if not 0 <= score <= 3:
+                return None
+            return {
+                "score": score,
+                "visible_requirements": self._string_list(parsed.get("visible_requirements")),
+            }
         except Exception as exc:
             print(f"[KIS] Qwen visual re-rank skipped for {image_path}: {exc}")
             return None
+
+    def score_kis_match(
+        self,
+        image_path: str,
+        original_query: str,
+        must_have: list[str],
+    ) -> int | None:
+        """Compatibility wrapper for existing callers."""
+        details = self.score_kis_match_details(image_path, original_query, must_have)
+        return int(details["score"]) if details is not None else None
 
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (
