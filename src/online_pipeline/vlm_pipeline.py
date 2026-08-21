@@ -18,10 +18,14 @@ class VLMPipeline:
         device: str | None = None,
         *,
         local_files_only: bool = False,
+        load_mode: str = "4bit",
     ):
+        if load_mode not in {"4bit", "bf16"}:
+            raise ValueError("load_mode must be '4bit' or 'bf16'")
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.local_files_only = local_files_only
+        self.load_mode = load_mode
         self.model = None
         self.processor = None
 
@@ -29,31 +33,42 @@ class VLMPipeline:
         if self.model is not None:
             return
         if self.device != "cuda" or not torch.cuda.is_available():
-            raise RuntimeError("Qwen2-VL 4-bit inference requires a Linux/CUDA runtime (use Colab GPU).")
+            raise RuntimeError("Qwen2-VL inference requires a Linux/CUDA runtime (use Colab GPU).")
 
-        try:
-            bnb_version = version("bitsandbytes")
-        except PackageNotFoundError as exc:
-            raise RuntimeError("Install bitsandbytes>=0.46.1 before loading Qwen2-VL.") from exc
-        if tuple(int(part) for part in re.findall(r"\d+", bnb_version)[:3]) < (0, 46, 1):
-            raise RuntimeError(f"bitsandbytes {bnb_version} is too old; install bitsandbytes>=0.46.1")
+        if self.load_mode == "4bit":
+            try:
+                bnb_version = version("bitsandbytes")
+            except PackageNotFoundError as exc:
+                raise RuntimeError("Install bitsandbytes>=0.46.1 before loading Qwen2-VL.") from exc
+            if tuple(int(part) for part in re.findall(r"\d+", bnb_version)[:3]) < (0, 46, 1):
+                raise RuntimeError(f"bitsandbytes {bnb_version} is too old; install bitsandbytes>=0.46.1")
+        elif not torch.cuda.is_bf16_supported():
+            raise RuntimeError("The selected GPU does not support BF16; use --vlm-mode 4bit instead.")
 
         from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2VLForConditionalGeneration
 
-        print(f"Loading VLM {self.model_name} in 4-bit CUDA mode...")
-        quant_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-        )
+        model_kwargs = {
+            "device_map": "auto",
+            "attn_implementation": "sdpa",
+            "local_files_only": self.local_files_only,
+        }
+        if self.load_mode == "4bit":
+            print(f"Loading VLM {self.model_name} in 4-bit CUDA mode...")
+            model_kwargs.update({
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                ),
+                "torch_dtype": torch.float16,
+            })
+        else:
+            print(f"Loading VLM {self.model_name} in BF16 CUDA mode...")
+            model_kwargs["torch_dtype"] = torch.bfloat16
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             self.model_name,
-            quantization_config=quant_config,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            attn_implementation="sdpa",
-            local_files_only=self.local_files_only,
+            **model_kwargs,
         )
         self.processor = AutoProcessor.from_pretrained(self.model_name, local_files_only=self.local_files_only)
         self.model.eval()

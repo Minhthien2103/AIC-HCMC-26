@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -31,7 +32,7 @@ from src.online_pipeline.text_evidence import (  # noqa: E402
 )
 from src.online_pipeline.vlm_pipeline import VLMPipeline  # noqa: E402
 from src.submission.formatting import format_kis_row, format_qa_row, format_trake_row  # noqa: E402
-from src.submission.io import validate_rows, write_csv  # noqa: E402
+from src.submission.io import read_csv_file, validate_rows, write_csv  # noqa: E402
 from src.submission.packaging import package_submission  # noqa: E402
 from src.submission.query_parser import QuerySpec, load_query_specs  # noqa: E402
 from src.submission.review import apply_review, write_review_assets, write_review_manifest_template  # noqa: E402
@@ -52,6 +53,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Output result ZIP")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
+    parser.add_argument(
+        "--vlm-mode",
+        choices=("4bit", "bf16"),
+        default="4bit",
+        help="Qwen load mode. Use bf16 on A100 for higher throughput; 4bit uses less VRAM.",
+    )
     parser.add_argument("--max-rows", type=int, default=100)
     parser.add_argument("--vqa-top-k", type=int, default=100)
     parser.add_argument("--trake-top-k", type=int, default=100)
@@ -101,6 +108,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--review-manifest", type=Path, help="JSON pin/keep/reject decisions for generated candidates.")
     parser.add_argument("--review-top-k", type=int, default=config.KIS_REVIEW_TOP_K)
     parser.add_argument("--provenance-dir", type=Path, help="Directory for reproducibility metadata (default next to ZIP).")
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        help="Persist validated per-query CSVs here so an interrupted batch can resume.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse valid CSVs already present in --checkpoint-dir.",
+    )
     parser.add_argument("--allow-external-search", action="store_true")
     return parser.parse_args()
 
@@ -162,8 +179,12 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
 
     # This object is lazy: Qwen weights load only if a VQA/TRAKE/KIS visual
     # operation actually needs them. A KIS-only CPU run therefore remains CLIP
-    # only, while a CUDA KIS run reuses the same loaded 4-bit Qwen instance.
-    vlm = VLMPipeline(device=args.device, local_files_only=args.offline) if (kis_qwen_enabled or needs_vqa or needs_trake) else None
+    # only, while a CUDA KIS run reuses the same loaded Qwen instance.
+    vlm = VLMPipeline(
+        device=args.device,
+        local_files_only=args.offline,
+        load_mode=args.vlm_mode,
+    ) if (kis_qwen_enabled or needs_vqa or needs_trake) else None
     has_kis = any(spec.query_type == "kis" for spec in specs)
     evidence_path = args.evidence_cache or (config.INDEX_DIR / "kis_evidence_cache.json")
     evidence_cache = None
@@ -387,6 +408,7 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
             "local_frame_budget": args.kis_local_frame_budget,
             "query_variant_limit": args.kis_query_variant_limit,
             "qwen_budget": args.kis_vlm_top_k,
+            "vlm_mode": args.vlm_mode,
             "frame_neighborhood_count": args.frame_neighborhood_count,
             "trake_event_top_k": args.trake_event_top_k,
             "trake_qwen_per_event": args.trake_qwen_per_event,
@@ -434,6 +456,8 @@ def main() -> int:
         raise SystemExit("KIS candidate/review budgets must be positive")
     if args.offline and args.allow_external_search:
         raise SystemExit("--offline and --allow-external-search cannot be used together")
+    if args.resume and args.checkpoint_dir is None:
+        raise SystemExit("--resume requires --checkpoint-dir")
     if args.provenance_dir is None:
         args.provenance_dir = args.output.with_suffix("").with_name(f"{args.output.stem}_provenance")
     if args.review_output_dir is None:
@@ -443,19 +467,51 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     specs = load_query_specs(args.queries_dir, args.manifest)
     tasks = _build_tasks(args, specs)
-    with tempfile.TemporaryDirectory(prefix="aic2026-submission-") as temp_dir:
-        submission_dir = Path(temp_dir) / "submission"
+    temporary_work = None
+    if args.checkpoint_dir is None:
+        temporary_work = tempfile.TemporaryDirectory(prefix="aic2026-submission-")
+        submission_dir = Path(temporary_work.name) / "submission"
+    else:
+        submission_dir = args.checkpoint_dir.resolve()
+    submission_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
         for spec in specs:
+            output_csv = submission_dir / f"{spec.query_id}.csv"
+            if args.resume and output_csv.exists():
+                checkpoint_rows = read_csv_file(output_csv)
+                checkpoint_errors = validate_rows(checkpoint_rows, spec, args.max_rows)
+                if not checkpoint_errors:
+                    LOGGER.info("%s: resumed %d validated rows", spec.query_id, len(checkpoint_rows))
+                    continue
+                LOGGER.warning(
+                    "%s: checkpoint is invalid and will be regenerated: %s",
+                    spec.query_id,
+                    "; ".join(checkpoint_errors),
+                )
+
             rows = _generate_for_query(spec, tasks, args)
             if not rows:
                 raise RuntimeError(f"Query {spec.query_id} produced no valid submission rows")
             errors = validate_rows([[str(value) for value in row] for row in rows], spec, args.max_rows)
             if errors:
                 raise RuntimeError(f"Generated CSV for {spec.query_id} failed validation: {'; '.join(errors)}")
-            output_csv = submission_dir / f"{spec.query_id}.csv"
-            write_csv(output_csv, rows)
-            LOGGER.info("%s: wrote %d rows", spec.query_id, len(rows))
-        package_submission(submission_dir, args.output)
+            temporary_csv = output_csv.with_suffix(output_csv.suffix + ".tmp")
+            write_csv(temporary_csv, rows)
+            temporary_csv.replace(output_csv)
+            LOGGER.info("%s: checkpointed %d rows", spec.query_id, len(rows))
+
+        # Package exactly the requested query set, even if a reused checkpoint
+        # directory contains CSVs from a different pack.
+        with tempfile.TemporaryDirectory(prefix="aic2026-package-") as package_temp:
+            package_dir = Path(package_temp) / "submission"
+            package_dir.mkdir(parents=True, exist_ok=True)
+            for spec in specs:
+                shutil.copy2(submission_dir / f"{spec.query_id}.csv", package_dir)
+            package_submission(package_dir, args.output)
+    finally:
+        if temporary_work is not None:
+            temporary_work.cleanup()
     LOGGER.info("Created %s", args.output)
     if args.review_output_dir is not None:
         template = write_review_manifest_template(

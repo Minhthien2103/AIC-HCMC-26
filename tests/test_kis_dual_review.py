@@ -93,3 +93,23 @@ def test_btc_labelled_trake_queries_keep_four_events_in_source_order():
     assert set(trake) == {"query-p1-4-trake", "query-p1-16-trake", "query-p1-18-trake"}
     assert all(len(spec.events) == 4 for spec in trake.values())
     assert trake["query-p1-18-trake"].events[1] != trake["query-p1-18-trake"].events[2]
+
+
+def test_trake_event_labels_without_colons_are_parsed(tmp_path: Path):
+    query = tmp_path / "query-p1-16-trake.txt"
+    query.write_text(
+        "Mở đầu là cận cảnh đầu một con lân.\n"
+        "E1 Hai con rồng vàng xoay vòng.\n"
+        "E2 Con lân hoàn tất cú xoay người trên trụ.\n"
+        "E3 Dùi chạm vào kẻng đồng múa lân.\n",
+        encoding="utf-8",
+    )
+
+    spec = load_query_specs(queries_dir=tmp_path)[0]
+
+    assert spec.description == "Mở đầu là cận cảnh đầu một con lân."
+    assert spec.events == (
+        "Hai con rồng vàng xoay vòng",
+        "Con lân hoàn tất cú xoay người trên trụ",
+        "Dùi chạm vào kẻng đồng múa lân",
+    )

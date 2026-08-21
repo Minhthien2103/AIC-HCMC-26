@@ -6,6 +6,10 @@ the same as a Codabench code submission.
 
 ## CUDA/Colab setup
 
+For the current SOTUYEN1 pack and a two-hour A100 deadline, follow
+[`COLAB_SOTUYEN1_A100.md`](COLAB_SOTUYEN1_A100.md). It stages Drive assets on
+the local SSD and provides standard/emergency resumable profiles.
+
 ```bash
 pip install -r requirements.txt
 python scripts/preflight.py --repo-root . --kis-profile fast --offline

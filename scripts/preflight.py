@@ -21,6 +21,8 @@ def main() -> int:
     parser.add_argument("--skip-model", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--kis-profile", choices=("fast", "full"), default="fast")
+    parser.add_argument("--require-kis-assets", action="store_true")
+    parser.add_argument("--vlm-mode", choices=("4bit", "bf16"), default="4bit")
     parser.add_argument("--min-free-gb", type=float, default=8.0)
     parser.add_argument("--offline", action="store_true", help="Require all models to be present in Hugging Face cache.")
     args = parser.parse_args()
@@ -56,15 +58,21 @@ def main() -> int:
         print(f"PREFLIGHT FAILED: temporary disk has {free:.1f} GB free; need at least {args.min_free_gb:.1f} GB. Clear /content before model loading.")
         return 1
     required = [config.FAISS_INDEX_PATH, config.METADATA_PATH, config.KEYFRAMES_DIR]
-    if args.kis_profile in {"fast", "full"}:
-        required.extend([config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH])
     if args.kis_profile == "full":
         required.append(config.VITH_INDEX_PATH)
     missing = [path for path in required if not path.exists()]
     if missing:
         print("PREFLIGHT FAILED: missing profile assets: " + ", ".join(str(path) for path in missing))
         return 1
-    print(f"KIS profile assets: {args.kis_profile} OK")
+    optional_fast = [config.MEDIA_TEXT_INDEX_PATH, config.MEDIA_TEXT_RECORDS_PATH]
+    missing_fast = [path for path in optional_fast if not path.exists()]
+    if missing_fast and args.require_kis_assets:
+        print("PREFLIGHT FAILED: missing fast KIS assets: " + ", ".join(str(path) for path in missing_fast))
+        return 1
+    if missing_fast:
+        print("KIS profile warning: media-E5 assets missing; run will use ViT-B/Qwen fallback")
+    else:
+        print("KIS fast assets: ViT-B + media-E5 OK")
     cache_roots = [
         Path(value) for value in (
             os.environ.get("HF_HUB_CACHE"),
@@ -72,11 +80,12 @@ def main() -> int:
             str(Path.home() / ".cache" / "huggingface" / "hub"),
         ) if value
     ]
-    model_dirs = (
+    model_dirs = [
         "models--Qwen--Qwen2-VL-7B-Instruct",
-        "models--intfloat--multilingual-e5-base",
         "models--facebook--mbart-large-50-many-to-many-mmt",
-    )
+    ]
+    if not missing_fast:
+        model_dirs.append("models--intfloat--multilingual-e5-base")
     missing_models = [
         model for model in model_dirs
         if not any((root / model / "snapshots").exists() and any((root / model / "snapshots").iterdir()) for root in cache_roots)
@@ -98,24 +107,33 @@ def main() -> int:
     print(f"torch: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
     if not torch.cuda.is_available():
-        print("PREFLIGHT FAILED: enable a CUDA GPU runtime (Colab Runtime > Change runtime type > T4 GPU).")
+        print("PREFLIGHT FAILED: enable a CUDA GPU runtime (A100 recommended for BF16).")
         return 1
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    try:
-        import bitsandbytes  # noqa: F401
+    if args.vlm_mode == "4bit":
+        try:
+            import bitsandbytes  # noqa: F401
 
-        print(f"bitsandbytes: {version('bitsandbytes')}")
-        if tuple(int(part) for part in __import__('re').findall(r"\d+", version('bitsandbytes'))[:3]) < (0, 46, 1):
-            raise RuntimeError("bitsandbytes>=0.46.1 is required")
-    except Exception as exc:
-        print(f"PREFLIGHT FAILED: bitsandbytes check: {exc}")
+            print(f"bitsandbytes: {version('bitsandbytes')}")
+            if tuple(int(part) for part in __import__('re').findall(r"\d+", version('bitsandbytes'))[:3]) < (0, 46, 1):
+                raise RuntimeError("bitsandbytes>=0.46.1 is required")
+        except Exception as exc:
+            print(f"PREFLIGHT FAILED: bitsandbytes check: {exc}")
+            return 1
+    elif not torch.cuda.is_bf16_supported():
+        print("PREFLIGHT FAILED: selected GPU does not support BF16; use --vlm-mode 4bit")
         return 1
 
     if not args.skip_model:
         try:
             from src.online_pipeline.vlm_pipeline import VLMPipeline
 
-            vlm = VLMPipeline(model_name=args.model, device="cuda", local_files_only=os.environ.get("HF_HUB_OFFLINE") == "1")
+            vlm = VLMPipeline(
+                model_name=args.model,
+                device="cuda",
+                local_files_only=os.environ.get("HF_HUB_OFFLINE") == "1",
+                load_mode=args.vlm_mode,
+            )
             vlm.load()
             print("Qwen2-VL model load: OK")
         except Exception as exc:
