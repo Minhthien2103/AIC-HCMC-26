@@ -47,6 +47,11 @@ LOGGER = logging.getLogger("aic2026.prepare_kis_assets")
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    parser.add_argument(
+        "--keyframes-dir",
+        type=Path,
+        help="Optional local keyframes directory; indexes/checkpoints still use --repo-root.",
+    )
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--download-media-info", action="store_true")
     parser.add_argument("--media-info-url", default=config.MEDIA_INFO_ARCHIVE_URL)
@@ -67,11 +72,11 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _configure_paths(repo_root: Path) -> None:
+def _configure_paths(repo_root: Path, keyframes_dir: Path | None = None) -> None:
     config.BASE_DIR = repo_root.resolve()
     config.DATA_DIR = config.BASE_DIR / "data"
     config.INDEX_DIR = config.BASE_DIR / "indexes"
-    config.KEYFRAMES_DIR = config.DATA_DIR / "keyframes"
+    config.KEYFRAMES_DIR = keyframes_dir.resolve() if keyframes_dir is not None else config.DATA_DIR / "keyframes"
     config.MEDIA_INFO_DIR = config.DATA_DIR / "media-info"
     config.METADATA_PATH = config.INDEX_DIR / "metadata.parquet"
     config.VITH_INDEX_PATH = config.INDEX_DIR / "faiss_vith.index"
@@ -335,7 +340,7 @@ def smoke_test(device: str, args: argparse.Namespace) -> None:
 def main() -> int:
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    _configure_paths(args.repo_root)
+    _configure_paths(args.repo_root, args.keyframes_dir)
     archive_path = args.media_info_archive or (config.DATA_DIR / "media-info-aic25-b1.zip")
     if args.download_media_info:
         _download_media_info(args.media_info_url, archive_path)
