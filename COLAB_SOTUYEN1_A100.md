@@ -5,6 +5,8 @@ This runbook deliberately leaves the old Drive checkout untouched. It clones
 keyframes/index files locally, and writes small checkpoints plus the final ZIP
 back to Drive. `metadata.parquet` already contains the frame mapping used by
 the online pipeline, so a separate `data/map-keyframes` folder is not needed.
+The setup also stages the existing `media_e5.index` and E5 model cache visible
+in Drive, enabling metadata retrieval without rebuilding any index.
 
 ## 1. Select A100 and mount Drive
 
@@ -87,7 +89,7 @@ for downloading/uploading the validated ZIP.
 - Do not run from `MyDrive/data/keyframes`; 177k small Drive reads are much
   slower than local SSD access.
 - Do not build ViT-H or PaddleOCR during this two-hour run.
-- Do not add `--require-kis-assets`: the Drive screenshot does not show the new
-  media-E5 index, so the intended fallback is ViT-B/32 + Qwen.
+- The current ViT-H feature checkpoint is incomplete (`5632/177321`) and must
+  not be used for this deadline run.
 - Do not add `--offline` unless an evidence cache exists for every KIS query.
 - A rerun is safe: valid per-query CSVs are skipped by `--resume`.

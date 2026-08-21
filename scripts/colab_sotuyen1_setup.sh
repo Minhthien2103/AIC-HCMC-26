@@ -49,6 +49,8 @@ require_path "$AIC_DRIVE_REPO/keyframes.zip"
 require_path "$AIC_DRIVE_REPO/indexes/faiss_clip.index"
 require_path "$AIC_DRIVE_REPO/indexes/metadata.parquet"
 require_path "$AIC_DRIVE_REPO/indexes/objects.parquet"
+require_path "$AIC_DRIVE_REPO/indexes/media_e5.index"
+require_path "$AIC_DRIVE_REPO/indexes/media_e5_records.json"
 require_path "$AIC_DRIVE_REPO/SOTUYEN1-bo-de-thi.zip"
 
 mkdir -p "$AIC_WORK_ROOT"
@@ -74,6 +76,7 @@ python -m pip install -q \
   "Pillow>=10.0.0" \
   "polars>=0.20.0" \
   "sentencepiece" \
+  "sentence-transformers>=3.0.0" \
   "transformers>=4.45.0,<5.0.0"
 
 mkdir -p "$AIC_ASSET_ROOT/data" "$AIC_ASSET_ROOT/indexes"
@@ -90,7 +93,12 @@ if [[ ! -f "$KEYFRAME_MARKER" ]]; then
   touch "$KEYFRAME_MARKER"
 fi
 
-for name in faiss_clip.index metadata.parquet objects.parquet; do
+for name in \
+  faiss_clip.index \
+  metadata.parquet \
+  objects.parquet \
+  media_e5.index \
+  media_e5_records.json; do
   copy_file_atomic "$AIC_DRIVE_REPO/indexes/$name" "$AIC_ASSET_ROOT/indexes/$name"
 done
 
@@ -113,6 +121,7 @@ LOCAL_HUB="$HF_HOME/hub"
 mkdir -p "$LOCAL_HUB"
 for model_dir in \
   models--Qwen--Qwen2-VL-7B-Instruct \
+  models--intfloat--multilingual-e5-base \
   models--facebook--mbart-large-50-many-to-many-mmt; do
   if [[ ! -d "$LOCAL_HUB/$model_dir" ]]; then
     for drive_hub in \
@@ -135,6 +144,7 @@ from huggingface_hub import snapshot_download
 
 for model in (
     "Qwen/Qwen2-VL-7B-Instruct",
+    "intfloat/multilingual-e5-base",
     "facebook/mbart-large-50-many-to-many-mmt",
 ):
     print(snapshot_download(model, max_workers=8))
