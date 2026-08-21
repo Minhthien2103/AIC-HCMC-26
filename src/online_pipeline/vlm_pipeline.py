@@ -183,7 +183,9 @@ class VLMPipeline:
         prompt = (
             "You are preparing a visual known-item video search. Return ONLY valid JSON with keys "
             "visual_queries, metadata_queries, ocr_queries, visible_constraints, factual_entities. Every value is "
-            "an array of concise English strings. visual_queries restate visible scenes/actions. metadata_queries "
+            "an array of concise English strings, even when the description is Vietnamese. The first visual_queries "
+            "entry must be one complete, discriminative retrieval sentence; later entries may isolate distinct "
+            "scenes/actions. metadata_queries "
             "contain titles, entities, places or event names useful in official video metadata. ocr_queries contain "
             "text likely to appear on screen. visible_constraints contain only discriminative things a frame can show. "
             "factual_entities contains named people, places, organisations or vehicles supported by the description "

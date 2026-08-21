@@ -84,6 +84,12 @@ class _MediaRetriever:
         return [{"video_id": "V0", "metadata_score": 0.99, "metadata_text": "matching video"}]
 
 
+class _RejectingQwen:
+    def score_kis_match(self, image_path: str, original_query: str, must_have: list[str]):
+        del image_path, original_query, must_have
+        return 0
+
+
 def test_long_query_variants_keep_tail_and_fit_context():
     task = KIStask(_Encoder(), _Retriever())
     query = "one two three four five six seven. eight nine FINAL_TARGET_TOKEN ten eleven twelve."
@@ -151,6 +157,12 @@ def test_qwen_analysis_failure_falls_back_to_clip(monkeypatch):
     assert [candidate["faiss_idx"] for candidate in results] == [0, 3, 6, 9, 1]
 
 
+def test_qwen_rejections_are_not_rank_fusion_evidence():
+    ranked = KIStask._qwen_ranked(_Retriever._rows()[:3], "query", [], _RejectingQwen())
+
+    assert ranked == []
+
+
 def test_media_video_candidates_never_enter_frame_neighborhood(monkeypatch):
     metadata = pl.DataFrame({
         "video_id": ["V0"] * 12,
@@ -170,3 +182,21 @@ def test_media_video_candidates_never_enter_frame_neighborhood(monkeypatch):
     assert len(results) == 5
     assert all(candidate.get("frame_id") is not None for candidate in results)
     assert all(candidate.get("keyframe_name") for candidate in results)
+
+
+def test_simple_baseline_concentrates_top_five_on_strongest_videos(monkeypatch):
+    task = KIStask(
+        _Encoder(),
+        _Retriever(),
+        baseline_simple=True,
+        video_budget=4,
+        local_frame_budget=3,
+    )
+    monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
+
+    results = task.execute("ordinary query", top_k=8)
+
+    assert len(results) == 8
+    assert results[0]["video_id"] == "V0"
+    assert sum(item["video_id"] == "V0" for item in results[:5]) == 3
+    assert len({item["video_id"] for item in results[:5]}) == 3

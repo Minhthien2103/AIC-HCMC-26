@@ -89,6 +89,11 @@ def _parse_args() -> argparse.Namespace:
         help="fast=ViT-B+media-E5+OCR+Qwen; full additionally requires ViT-H.",
     )
     parser.add_argument(
+        "--kis-baseline-simple",
+        action="store_true",
+        help="Use HCMAI-style raw-CLIP video aggregation and top-k-aware output allocation.",
+    )
+    parser.add_argument(
         "--enable-kis-dual",
         action="store_true",
         help="Deprecated alias for --kis-profile full.",
@@ -256,6 +261,7 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
         query_variant_limit=args.kis_query_variant_limit,
         neighborhood_count=args.frame_neighborhood_count,
         strict_sources=args.require_kis_assets,
+        baseline_simple=args.kis_baseline_simple,
     )
     trake = TrakeTask(encoder, retriever, vlm_pipeline=vlm, media_retriever=media_retriever, ocr=ocr, frame_neighborhood=frame_neighborhood) if needs_trake else None
 
@@ -409,6 +415,7 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
         "config": {
             "offline": args.offline,
             "kis_profile": args.kis_profile,
+            "kis_baseline_simple": args.kis_baseline_simple,
             "enable_kis_dual_alias": args.enable_kis_dual,
             "candidate_budget": args.kis_candidate_budget,
             "ocr_candidate_budget": args.kis_ocr_candidate_budget,

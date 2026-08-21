@@ -45,6 +45,7 @@ class KIStask:
         query_variant_limit: int | None = None,
         neighborhood_count: int | None = None,
         strict_sources: bool = False,
+        baseline_simple: bool = False,
     ):
         self.encoder = encoder
         self.retriever = retriever
@@ -64,6 +65,7 @@ class KIStask:
         self.neighborhood_count = int(neighborhood_count or config.FRAME_NEIGHBORHOOD_COUNT)
         self.frame_neighborhood = frame_neighborhood
         self.strict_sources = strict_sources
+        self.baseline_simple = bool(baseline_simple)
 
     def _context_limit(self, encoder=None) -> int:
         return max(4, int(getattr(encoder or self.encoder, "text_context_length", 77)))
@@ -265,19 +267,237 @@ class KIStask:
                 continue
             if not details or details.get("score") is None:
                 continue
+            score = int(details["score"])
+            if score <= 0:
+                continue
             item = candidate.copy()
-            item["qwen_match_score"] = int(details["score"])
+            item["qwen_match_score"] = score
             item["qwen_visible_requirements"] = list(details.get("visible_requirements") or [])
             item["qwen_input_rank"] = input_rank
             output.append(item)
         return sorted(output, key=lambda item: (-int(item["qwen_match_score"]), int(item["qwen_input_rank"])))
+
+    @staticmethod
+    def _baseline_video_candidates(
+        ranked_lists: list[list[dict[str, Any]]],
+        *,
+        top_frames: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Rank videos by their strongest raw CLIP keyframes.
+
+        This intentionally follows the HCMAI2025 baseline's simple strategy:
+        retrieve keyframes first, group them by video, then choose videos by
+        aggregate similarity. Raw cosine scores remain comparable because all
+        lists use the same CLIP model; no RRF/D'Hondt score flattening occurs.
+        """
+        evidence: dict[str, dict[str, Any]] = {}
+        for query_index, rows in enumerate(ranked_lists):
+            for rank, candidate in enumerate(rows, start=1):
+                video_id = str(candidate.get("video_id", "")).removesuffix(".mp4")
+                if not video_id:
+                    continue
+                item = evidence.setdefault(
+                    video_id,
+                    {"video_id": video_id, "frames": {}, "query_best_ranks": {}},
+                )
+                identity = candidate_identity(candidate)
+                existing = item["frames"].get(identity)
+                if existing is None or float(candidate.get("score", 0.0)) > float(existing.get("score", 0.0)):
+                    frame = candidate.copy()
+                    frame["video_id"] = video_id
+                    item["frames"][identity] = frame
+                item["query_best_ranks"][query_index] = min(
+                    rank,
+                    int(item["query_best_ranks"].get(query_index, rank)),
+                )
+
+        videos: list[dict[str, Any]] = []
+        for item in evidence.values():
+            frames = sorted(
+                item["frames"].values(),
+                key=lambda frame: (-float(frame.get("score", 0.0)), candidate_identity(frame)),
+            )
+            strongest = frames[: max(1, int(top_frames))]
+            mean_score = sum(float(frame.get("score", 0.0)) for frame in strongest) / len(strongest)
+            best_score = float(strongest[0].get("score", 0.0))
+            rank_support = sum(1.0 / (20.0 + rank) for rank in item["query_best_ranks"].values())
+            videos.append({
+                "video_id": item["video_id"],
+                "baseline_mean_score": mean_score,
+                "baseline_best_score": best_score,
+                "baseline_rank_support": rank_support,
+                "baseline_query_coverage": len(item["query_best_ranks"]),
+                "frames": frames,
+            })
+        videos.sort(
+            key=lambda item: (
+                -float(item["baseline_mean_score"]),
+                -float(item["baseline_rank_support"]),
+                -float(item["baseline_best_score"]),
+                str(item["video_id"]),
+            )
+        )
+        for rank, item in enumerate(videos, start=1):
+            item["video_rank"] = rank
+        return videos
+
+    def _baseline_frame_queue(self, frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Put several independent anchors before their wider neighbours."""
+        anchors = frames[: max(16, self.local_frame_budget)]
+        if self.frame_neighborhood is None:
+            return [item.copy() for item in anchors]
+        proposals = [
+            self.frame_neighborhood.proposals(anchor, count=self.neighborhood_count)
+            for anchor in anchors
+        ]
+        output: list[dict[str, Any]] = []
+        seen: set[tuple[str, int]] = set()
+        for neighborhood_rank in range(self.neighborhood_count):
+            for anchor_rank, values in enumerate(proposals, start=1):
+                if neighborhood_rank >= len(values):
+                    continue
+                item = values[neighborhood_rank].copy()
+                key = (str(item["video_id"]), int(item["frame_id"]))
+                if key in seen:
+                    continue
+                seen.add(key)
+                item["baseline_anchor_rank"] = anchor_rank
+                output.append(item)
+        return output
+
+    @staticmethod
+    def _weighted_tier(
+        queues: list[list[dict[str, Any]]],
+        weights: list[float],
+        amount: int,
+        output: list[dict[str, Any]],
+        seen: set[tuple[str, int]],
+    ) -> None:
+        emitted = [0 for _ in queues]
+        for _ in range(max(0, amount)):
+            available = [index for index, queue in enumerate(queues) if queue]
+            if not available:
+                return
+            selected = min(
+                available,
+                key=lambda index: (
+                    -weights[index] / (emitted[index] + 1),
+                    index,
+                ),
+            )
+            while queues[selected]:
+                candidate = queues[selected].pop(0).copy()
+                key = (str(candidate["video_id"]), int(candidate["frame_id"]))
+                if key in seen:
+                    continue
+                seen.add(key)
+                emitted[selected] += 1
+                output.append(candidate)
+                break
+
+    def _baseline_allocate(self, videos: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+        selected = videos[: min(self.video_budget, 8)]
+        queues: list[list[dict[str, Any]]] = []
+        for video in selected:
+            queue = self._baseline_frame_queue(video["frames"])
+            for candidate in queue:
+                candidate["video_rank"] = int(video["video_rank"])
+                candidate["baseline_video_score"] = float(video["baseline_mean_score"])
+            queues.append(queue)
+        if not queues:
+            return []
+
+        output: list[dict[str, Any]] = []
+        seen: set[tuple[str, int]] = set()
+        tiers = [
+            (5, [0.60, 0.25, 0.15]),
+            (15, [0.60, 0.25, 0.10, 0.05]),
+            (30, [0.45, 0.25, 0.15, 0.10, 0.05]),
+            (50, [0.30, 0.20, 0.15, 0.10, 0.08, 0.07, 0.05, 0.05]),
+        ]
+        remaining = int(top_k)
+        for tier_size, tier_weights in tiers:
+            if remaining <= 0:
+                break
+            amount = min(remaining, tier_size)
+            weights = tier_weights[: len(queues)]
+            if len(weights) < len(queues):
+                weights.extend([tier_weights[-1]] * (len(queues) - len(weights)))
+            total = sum(weights)
+            weights = [weight / total for weight in weights]
+            self._weighted_tier(queues, weights, amount, output, seen)
+            remaining = int(top_k) - len(output)
+        return output[:top_k]
+
+    def _execute_baseline(
+        self,
+        original_query: str,
+        english_query: str,
+        analysis: dict[str, list[str]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        refined = self._unique_strings(analysis["visual_queries"])
+        queries = refined[: self.query_variant_limit]
+        if english_query.strip() and english_query.strip() not in queries:
+            queries.append(english_query.strip())
+        queries = self._unique_strings([
+            part
+            for value in queries
+            for part in self._query_variants(value)
+        ])[: self.query_variant_limit + 1]
+        if not queries:
+            queries = [original_query]
+
+        encode_batch = getattr(self.encoder, "encode_text_batch", None)
+        vectors = encode_batch(queries) if callable(encode_batch) else [self.encoder.encode_text(value) for value in queries]
+        pool_size = self._candidate_pool_size(max(top_k * 10, self.candidate_budget))
+        search_batch = getattr(self.retriever, "search_batch", None)
+        ranked_lists = search_batch(vectors, top_k=pool_size) if callable(search_batch) else [
+            self.retriever.search(vector, top_k=pool_size) for vector in vectors
+        ]
+        videos = self._baseline_video_candidates(ranked_lists)[: self.video_budget]
+        if not videos:
+            return []
+
+        video_ids = [str(video["video_id"]) for video in videos]
+        local_lists: list[list[dict[str, Any]]] = []
+        for video_id in video_ids:
+            try:
+                batch = getattr(self.retriever, "search_in_video_batch", None)
+                per_query = batch(vectors, video_id=video_id, top_k=self.local_frame_budget) if callable(batch) else [
+                    self.retriever.search_in_video(vector, video_id, self.local_frame_budget) for vector in vectors
+                ]
+            except AttributeError:
+                per_query = [
+                    [row for row in rows if str(row.get("video_id", "")).removesuffix(".mp4") == video_id][
+                        : self.local_frame_budget
+                    ]
+                    for rows in ranked_lists
+                ]
+            local_lists.extend(per_query)
+        local_videos = self._baseline_video_candidates(local_lists)
+        local_by_id = {str(video["video_id"]): video for video in local_videos}
+        for video in videos:
+            local = local_by_id.get(str(video["video_id"]))
+            if local and local["frames"]:
+                video["frames"] = local["frames"]
+
+        results = self._baseline_allocate(videos, top_k)
+        print(
+            f"[KIS baseline] queries={len(queries)} global_pool={pool_size} "
+            f"videos={len(videos)} top_video={videos[0]['video_id']} output={len(results)}"
+        )
+        return results
 
     def execute(self, query: str, top_k: int = 100, object_labels: str = "", *, query_id: str | None = None) -> list[dict[str, Any]]:
         del object_labels
         english = translate_vi_to_en(query)
         if english != query:
             print(f"Translated query: {english}")
-        analysis = self._qwen_analysis(english, query_id=query_id)
+        analysis_query = query if self.baseline_simple else english
+        analysis = self._qwen_analysis(analysis_query, query_id=query_id)
+        if self.baseline_simple:
+            return self._execute_baseline(query, english, analysis, top_k)
         visual = self._unique_strings(analysis["visual_queries"], excluded={english})[:self.query_variant_limit]
         metadata_queries = self._unique_strings([english, *analysis["metadata_queries"], *analysis["factual_entities"]])[:self.query_variant_limit + 1]
         ocr_queries = self._unique_strings([english, *analysis["ocr_queries"]])[:self.query_variant_limit + 1]
