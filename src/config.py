@@ -78,3 +78,9 @@ def keyframe_path(video_id: str, keyframe_name: str) -> Path:
 # TRAKE
 TRAKE_VLM_TOP_K = 30
 TRAKE_VLM_PROMOTE_MIN_SCORE = 2
+
+MILVUS_URI = "http://localhost:19530"   # Thien
+ES_URL     = "http://localhost:9200"    # Thien
+
+# MILVUS_URI = "https://xxxx.trycloudflare.com"  # Team 
+# ES_URL     = "https://yyyy.trycloudflare.com"  # Team
