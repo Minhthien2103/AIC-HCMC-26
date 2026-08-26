@@ -6,6 +6,9 @@ only visually verified keyframes while retaining an untouched CLIP fallback.
 """
 
 from __future__ import annotations
+from src.tasks.gemini_api import GeminiPipeline
+gemini_api = GeminiPipeline()
+
 
 import re
 import time
@@ -259,16 +262,122 @@ class KIStask:
                     return output
         return output
 
+
+    # -- Multi-scene temporal keywords (Vietnamese) --
+    _MULTI_SCENE_MARKERS = re.compile(
+        r"(?:bat dau|ket thuc|sau do|tiep theo|truoc do|tiep den"
+        r"|bắt đầu|kết thúc|sau đó|tiếp theo|trước đó|tiếp đến"
+        r"|rồi|sau vài giây|ngay sau)",
+        re.IGNORECASE,
+    )
+
+    def _is_multi_scene(self, query: str) -> bool:
+        """Detect if a KIS query describes multiple temporal scenes."""
+        return len(self._MULTI_SCENE_MARKERS.findall(query)) >= 1
+
+    def _split_scenes(self, query: str) -> list[str]:
+        """Split a multi-scene query into individual scene descriptions."""
+        # Split on sentence boundaries
+        scenes = [s.strip() for s in _SENTENCE_BOUNDARY_RE.split(query) if s.strip()]
+        # If we only got 1 chunk, the query isn't really multi-scene
+        return scenes if len(scenes) > 1 else [query]
+
+    def _video_level_rrf(
+        self,
+        scenes: list[str],
+        english_query: str,
+        pool_size: int,
+    ) -> list[dict[str, Any]]:
+        video_rrf: dict[str, float] = {}
+        all_candidates: dict[str, dict[int, dict[str, Any]]] = {}  # video_id -> faiss_idx -> cand
+        
+        for scene_idx, scene in enumerate(scenes):
+            scene_en = translate_vi_to_en(scene)
+            variants = self._query_variants(scene_en)
+            if not variants:
+                continue
+            scene_results = self._retrieve(variants, pool_size)
+            
+            scene_video_scores: dict[str, float] = {}
+            for cand in scene_results:
+                vid = cand["video_id"]
+                score = float(cand.get("score", 0.0))
+                scene_video_scores[vid] = max(scene_video_scores.get(vid, float("-inf")), score)
+                
+                if vid not in all_candidates:
+                    all_candidates[vid] = {}
+                idx = int(cand["faiss_idx"])
+                if idx not in all_candidates[vid]:
+                    all_candidates[vid][idx] = cand.copy()
+                    all_candidates[vid][idx]["scene_idx"] = scene_idx
+                else:
+                    all_candidates[vid][idx]["scene_idx"] = max(all_candidates[vid][idx]["scene_idx"], scene_idx)
+                    all_candidates[vid][idx]["score"] = max(float(all_candidates[vid][idx]["score"]), score)
+            
+            sorted_vids = sorted(scene_video_scores.keys(), key=lambda v: scene_video_scores[v], reverse=True)
+            for rank, vid in enumerate(sorted_vids):
+                video_rrf[vid] = video_rrf.get(vid, 0.0) + 1.0 / (config.KIS_RRF_K + rank + 1)
+        
+        top_videos = sorted(video_rrf.keys(), key=lambda v: video_rrf[v], reverse=True)[:20]
+        print(f"[KIS] Multi-scene: {len(scenes)} scenes, top videos: {top_videos[:5]}")
+        
+        output: list[dict[str, Any]] = []
+        for vid in top_videos:
+            vid_cands = list(all_candidates.get(vid, {}).values())
+            # Boost frames that come from the LAST scene (often the target keyframe)
+            # Add +100 to score to force them to the top of this video's candidates
+            for c in vid_cands:
+                c["score"] = float(c["score"])
+                if c["scene_idx"] == len(scenes) - 1:
+                    c["score"] += 100.0
+            
+            vid_cands.sort(key=lambda c: c["score"], reverse=True)
+            for cand in vid_cands:
+                boosted = cand.copy()
+                # Preserve video-level order
+                boosted["score"] = cand["score"] + (video_rrf[vid] * 1000)
+                output.append(boosted)
+        
+        output.sort(key=lambda c: c["score"], reverse=True)
+        return output
+
     def execute(self, query: str, top_k: int = 100, object_labels: str = "") -> list[dict[str, Any]]:
         english_query = translate_vi_to_en(query)
         if english_query != query:
             print(f"Translated query: {english_query}")
 
         pool_size = self._candidate_pool_size(top_k)
+        
+        # Detect multi-scene queries and use video-level RRF
+        is_multi = self._is_multi_scene(query)
+        scenes = self._split_scenes(query) if is_multi else []
+        
+        if is_multi and len(scenes) > 1:
+            print(f"[KIS] Multi-scene query detected ({len(scenes)} scenes)")
+            video_boosted = self._video_level_rrf(scenes, english_query, pool_size)
+        else:
+            video_boosted = []
+        
         baseline_variants = self._query_variants(english_query)
         baseline = self._retrieve(baseline_variants, pool_size)
-        if not baseline:
+        if not baseline and not video_boosted:
             return []
+        
+        # Merge video-level RRF results into baseline (video-boosted first)
+        if video_boosted:
+            seen_idx = set()
+            merged = []
+            for cand in video_boosted:
+                idx = int(cand["faiss_idx"])
+                if idx not in seen_idx:
+                    seen_idx.add(idx)
+                    merged.append(cand)
+            for cand in baseline:
+                idx = int(cand["faiss_idx"])
+                if idx not in seen_idx:
+                    seen_idx.add(idx)
+                    merged.append(cand)
+            baseline = merged
 
         analysis = self._qwen_analysis(english_query)
         qwen_hints = self._unique_strings(
@@ -287,16 +396,39 @@ class KIStask:
 
         manual_objects = self._unique_strings(object_labels.split(",")) if object_labels else []
         must_have = self._unique_strings([*analysis["must_have"], *manual_objects])
-        qwen_candidates = self._select_vlm_candidates(baseline, expanded, min(top_k, self.vlm_top_k))
-        qwen_scores = self._qwen_rerank(qwen_candidates, english_query, must_have)
-        promoted = [
-            candidate for candidate in qwen_scores
-            if int(candidate["qwen_match_score"]) >= config.KIS_VLM_PROMOTE_MIN_SCORE
-        ]
-        promoted.sort(
-            key=lambda candidate: (int(candidate["qwen_match_score"]), float(candidate["score"])),
-            reverse=True,
-        )
+        
+        # Apply strict object pre-filtering via parquet DB so VLM focuses only on semantic context
+        if self.object_filter and must_have:
+            baseline = self.object_filter.filter_candidates(baseline, must_have, mode="boost")
+            if expanded:
+                expanded = self.object_filter.filter_candidates(expanded, must_have, mode="boost")
+                
+        # Phase 2: Extreme API Batching (Collage Strategy)
+        # Extract Top 10 unique videos from baseline
+        top_videos_data = {}
+        for cand in baseline:
+            vid = cand["video_id"]
+            if vid not in top_videos_data:
+                top_videos_data[vid] = []
+            if len(top_videos_data[vid]) < 3: # Max 3 frames per video for storyboard
+                img_path = str(config.keyframe_path(vid, cand["keyframe_name"]))
+                top_videos_data[vid].append(img_path)
+            if len(top_videos_data) >= 10: # Top 10 videos max
+                break
+                
+        candidate_payload = [{"video_id": vid, "frames": frames} for vid, frames in top_videos_data.items()]
+        
+        print(f"[Gemini] Sending {len(candidate_payload)} candidate videos for 1-Call tournament...")
+        winner_vid = gemini_api.evaluate_kis_candidates(query, candidate_payload)
+        
+        promoted = []
+        if winner_vid and winner_vid != "NONE":
+            print(f"[Gemini] Winner selected: {winner_vid}")
+            # Promote all frames from the winning video to the top of the list!
+            for cand in baseline + expanded:
+                if cand["video_id"] == winner_vid:
+                    promoted.append(cand.copy())
+            
         results = self._ordered_unique([promoted, baseline, expanded], top_k)
         print(
             f"[KIS] baseline={len(baseline)} expanded={len(expanded)} "

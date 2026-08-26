@@ -158,22 +158,19 @@ class VLMPipeline:
         self,
         image_path: str,
         original_query: str,
-        must_have: list[str],
+        must_have: list[str] = None,  # Kept for compatibility but ignored
     ) -> int | None:
-        """Return a conservative 0--3 visual match score, or None on failure."""
-        criteria = "\n".join(f"- {item}" for item in must_have) or "- Use the original description."
+        """Return a semantic 0--3 visual match score (ignoring must_have as pre-filtering handles it)."""
         messages = [{
             "role": "user",
             "content": [
                 {"type": "image"},
                 {"type": "text", "text": (
-                    "Score how well this image matches the visual known-item search below. "
+                    "Score how well this image semantically matches the description below. "
                     "Return ONLY valid JSON exactly like {\"score\": 0}. "
-                    "Use 0 for unrelated/contradicted, 1 for only broad context, 2 for most visible "
-                    "requirements, and 3 for all visible requirements. Do not infer details that cannot "
-                    "be seen in the image.\n"
-                    f"Original description: {original_query}\n"
-                    f"Visible requirements:\n{criteria}"
+                    "Use 0 for unrelated, 1 for similar broad context but wrong action/setting, "
+                    "2 for a strong match of the main action, and 3 for a perfect exact match.\n"
+                    f"Description: {original_query}"
                 )},
             ],
         }]
@@ -188,6 +185,30 @@ class VLMPipeline:
         except Exception as exc:
             print(f"[KIS] Qwen visual re-rank skipped for {image_path}: {exc}")
             return None
+
+    def read_text_in_image(self, image_path: str, question: str, lang: str = "vi") -> str:
+        """OCR-mode: ask VLM to read and transcribe visible text relevant to the question."""
+        from PIL import Image
+        lang_out = "Vietnamese" if lang == "vi" else "English"
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Question: {question}\n"
+                    "First, accurately transcribe ALL text visible in this image, paying attention to banners, signs, and posters. "
+                    f"Then, use the transcribed text to answer the question concisely in {lang_out}. "
+                    "If no relevant text is visible, output ONLY: not visible."
+                )},
+            ],
+        }]
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            return self._generate_text(self._prepare(messages, image), max_new_tokens=128)
+        except Exception as exc:
+            print(f"[VLM] OCR error for {image_path}: {exc}")
+            return "not visible"
 
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (

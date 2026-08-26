@@ -35,8 +35,16 @@ def align_event_candidates(
                 frame_id = int(candidate["frame_id"])
                 if previous_frame is not None and frame_id <= int(previous_frame):
                     continue
+                
+                # Apply a small penalty for very large temporal gaps between events
+                # Assumes 25 fps: 1 minute = 1500 frames
+                penalty = 0.0
+                if previous_frame is not None:
+                    gap = frame_id - int(previous_frame)
+                    penalty = min(gap * 0.00001, 0.05)  # Cap penalty at 0.05
+                
                 next_states.append(_State(
-                    score=state.score + float(candidate.get("score", 0.0)),
+                    score=state.score + float(candidate.get("score", 0.0)) - penalty,
                     events=[*state.events, candidate],
                 ))
         if not next_states:
