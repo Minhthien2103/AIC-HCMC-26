@@ -79,8 +79,16 @@ def keyframe_path(video_id: str, keyframe_name: str) -> Path:
 TRAKE_VLM_TOP_K = 30
 TRAKE_VLM_PROMOTE_MIN_SCORE = 2
 
-MILVUS_URI = "http://localhost:19530"   # Thien
-ES_URL     = "http://localhost:9200"    # Thien
+# ── Vector Database ─────────────────────────────────────────────────────
+ZILLIZ_URI   = "https://your-cluster.api.zillizcloud.com"
+ZILLIZ_TOKEN = "your-zilliz-api-key"
+MILVUS_COLLECTION = "aic_captions"
 
-# MILVUS_URI = "https://xxxx.trycloudflare.com"  # Team 
-# ES_URL     = "https://yyyy.trycloudflare.com"  # Team
+# ── RAG (Text-based semantic search) ────────────────────────────────────  
+SUPABASE_URL   = "https://your-project.supabase.co"
+SUPABASE_KEY   = "your-anon-key"  # For vector similarity search
+SUPABASE_TOKEN = "your-service-role-key"  # For FTS queries (NOT needed if using stored tsvector)
+
+# The table we created in init_db.py
+RAG_TABLE_NAME = "aic_captions"
+SUPABASE_KEY = "your-supabase-anon-key"

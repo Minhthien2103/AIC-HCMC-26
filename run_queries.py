@@ -22,13 +22,13 @@ from pathlib import Path
 # =============================================================================
 # TUNEABLE DEFAULTS  -  change these without touching the rest of the file
 # =============================================================================
-DEFAULT_QUERIES_DIR    = "data/round_1_1"   # input folder
+DEFAULT_QUERIES_DIR    = "data/round_1_2"   # input folder
 DEFAULT_OUTPUT_DIR     = "submission"       # output folder
-DEFAULT_TOP_K          = 50                # candidates per KIS / TRAKE query
-DEFAULT_VQA_TOP_K      = 5                # candidates per VQA query (VLM is slow)
-DEFAULT_TRAKE_VIDEOS   = 10                # videos re-ranked in TRAKE phase B
+DEFAULT_TOP_K          = 100                # candidates per KIS / TRAKE query
+DEFAULT_VQA_TOP_K      = 10                 # candidates per VQA query (VLM is slow)
+DEFAULT_TRAKE_VIDEOS   = 10                 # videos re-ranked in TRAKE phase B
 DEFAULT_PARAPHRASE_N   = 2                  # number of expanded query variants (RRF)
-DEFAULT_MAX_ROWS       = DEFAULT_TOP_K               # max CSV rows written per query
+DEFAULT_MAX_ROWS       = DEFAULT_TOP_K      # max CSV rows written per query
 DEFAULT_DEVICE         = "cuda"             # "cuda" or "cpu"
 ENABLE_VLM             = True               # set False to skip Qwen2-VL entirely
 ENABLE_EXTERNAL_SEARCH = True               # set True for web fact-lookup in VQA
