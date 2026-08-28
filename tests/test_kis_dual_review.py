@@ -84,10 +84,18 @@ def test_review_can_pin_or_reject_only_generated_videos(tmp_path: Path):
     assert ordered[-1]["video_id"] == candidates[0]["video_id"]
 
 
-def test_btc_labelled_trake_queries_keep_four_events_in_source_order():
-    query_dir = Path(__file__).resolve().parents[1] / "query" / "THUNGHIEM-bo-de-thi"
+def test_btc_labelled_trake_queries_keep_four_events_in_source_order(tmp_path: Path):
+    for query_id in (4, 16):
+        (tmp_path / f"query-p1-{query_id}-trake.txt").write_text(
+            "Video description.\nE1: first.\nE2: second.\nE3: third.\nE4: fourth.\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "query-p1-18-trake.txt").write_text(
+        "Video description.\nE1: first.\nE2: second.\nE2: third.\nE4: fourth.\n",
+        encoding="utf-8",
+    )
     with pytest.warns(RuntimeWarning, match="labels"):
-        specs = load_query_specs(queries_dir=query_dir)
+        specs = load_query_specs(queries_dir=tmp_path)
     trake = {spec.query_id: spec for spec in specs if spec.query_type == "trake"}
 
     assert set(trake) == {"query-p1-4-trake", "query-p1-16-trake", "query-p1-18-trake"}

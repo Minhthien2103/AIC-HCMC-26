@@ -35,6 +35,27 @@ def test_query_parser_extracts_inline_numbered_trake_events(tmp_path: Path):
     assert specs[0].events == ("giậm nhảy", "bay qua xà", "tiếp đất", "đứng dậy")
 
 
+def test_query_parser_extracts_vietnamese_scene_labels(tmp_path: Path):
+    (tmp_path / "query-p2-21-trake.txt").write_text(
+        "4 cảnh này xảy ra liên tiếp nhau.\n"
+        "Cảnh 1: Dán niêm phong thùng carton.\n"
+        "Cảnh 2: Sắp xếp các thùng hàng.\n"
+        "Cảnh 3: Nhấc một thùng hàng.\n"
+        "Cảnh 4: Các thùng nằm trên xe tải.\n",
+        encoding="utf-8",
+    )
+
+    spec = load_query_specs(queries_dir=tmp_path)[0]
+
+    assert spec.description == "4 cảnh này xảy ra liên tiếp nhau."
+    assert spec.events == (
+        "Dán niêm phong thùng carton",
+        "Sắp xếp các thùng hàng",
+        "Nhấc một thùng hàng",
+        "Các thùng nằm trên xe tải",
+    )
+
+
 def test_query_parser_manifest(tmp_path: Path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"queries": [{

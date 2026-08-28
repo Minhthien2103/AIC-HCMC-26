@@ -52,6 +52,25 @@ def _parse_args() -> argparse.Namespace:
     source.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path, required=True, help="Output result ZIP")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    parser.add_argument(
+        "--retrieval-backend",
+        choices=("zilliz", "faiss"),
+        default=config.RETRIEVAL_BACKEND,
+        help="zilliz searches MobileCLIP visual+subtitle collections; faiss keeps the legacy local index.",
+    )
+    parser.add_argument(
+        "--metadata-path",
+        type=Path,
+        help="Canonical mapping metadata.parquet (or set AIC_METADATA_PATH).",
+    )
+    parser.add_argument(
+        "--keyframes-dir",
+        type=Path,
+        help="Extracted keyframe root used by Qwen/OCR (or set AIC_KEYFRAMES_DIR).",
+    )
+    parser.add_argument("--zilliz-visual-collection", default=config.ZILLIZ_VISUAL_COLLECTION)
+    parser.add_argument("--zilliz-text-collection", default=config.ZILLIZ_TEXT_COLLECTION)
+    parser.add_argument("--zilliz-object-collection", default=config.ZILLIZ_OBJECT_COLLECTION)
     parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
     parser.add_argument(
         "--vlm-mode",
@@ -86,7 +105,7 @@ def _parse_args() -> argparse.Namespace:
         "--kis-profile",
         choices=("fast", "full"),
         default="fast",
-        help="fast=ViT-B+media-E5+OCR+Qwen; full additionally requires ViT-H.",
+        help="fast=primary retrieval+optional media-E5/OCR/Qwen; full additionally requires the legacy ViT-H index.",
     )
     parser.add_argument(
         "--kis-baseline-simple",
@@ -152,13 +171,21 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
     config.DATA_DIR = repo_root / "data"
     config.INDEX_DIR = repo_root / "indexes"
     config.VIDEOS_DIR = config.DATA_DIR / "raw_videos"
-    config.KEYFRAMES_DIR = config.DATA_DIR / "keyframes"
+    config.KEYFRAMES_DIR = (
+        args.keyframes_dir.expanduser().resolve()
+        if args.keyframes_dir is not None
+        else Path(os.getenv("AIC_KEYFRAMES_DIR", config.DATA_DIR / "keyframes")).expanduser()
+    )
     config.CLIP_FEATURES_DIR = config.DATA_DIR / "clip-features-32"
     config.MAP_KEYFRAMES_DIR = config.DATA_DIR / "map-keyframes"
     config.OBJECTS_DIR = config.DATA_DIR / "objects"
     config.MEDIA_INFO_DIR = config.DATA_DIR / "media-info"
     config.FAISS_INDEX_PATH = config.INDEX_DIR / "faiss_clip.index"
-    config.METADATA_PATH = config.INDEX_DIR / "metadata.parquet"
+    config.METADATA_PATH = (
+        args.metadata_path.expanduser().resolve()
+        if args.metadata_path is not None
+        else Path(os.getenv("AIC_METADATA_PATH", config.INDEX_DIR / "metadata.parquet")).expanduser()
+    )
     config.OBJECTS_PATH = config.INDEX_DIR / "objects.parquet"
     config.MEDIA_INFO_PATH = config.INDEX_DIR / "media_info.json"
     config.VITH_INDEX_PATH = config.INDEX_DIR / "faiss_vith.index"
@@ -175,11 +202,46 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
     # mBART handles only a few query strings; keep it on CPU so the T4 has
     # headroom for ViT-H, E5 and Qwen2-VL during candidate reranking.
     configure_translation(cache_path=translation_cache, offline=args.offline, device="cpu")
-    encoder = QueryEncoder(config.CLIP_MODEL_NAME, config.CLIP_PRETRAINED, device=args.device)
-    retriever = RetrievalEngine(config.FAISS_INDEX_PATH, config.METADATA_PATH)
-    if retriever.index is None or retriever.meta_df is None:
-        raise RuntimeError("FAISS index and metadata are required before generating a submission")
-    object_filter = ObjectFilter(config.OBJECTS_PATH)
+    if args.retrieval_backend == "zilliz":
+        from src.online_pipeline.zilliz_object_filter import ZillizObjectFilter
+        from src.online_pipeline.zilliz_retrieval import ZillizRetrievalEngine
+
+        encoder = QueryEncoder(
+            config.ZILLIZ_CLIP_MODEL_NAME,
+            config.ZILLIZ_CLIP_PRETRAINED,
+            device=args.device,
+        )
+        retriever = ZillizRetrievalEngine(
+            uri=os.getenv("ZILLIZ_URI", config.ZILLIZ_URI),
+            token=os.getenv("ZILLIZ_TOKEN", config.ZILLIZ_TOKEN),
+            metadata_path=config.METADATA_PATH,
+            visual_collection=args.zilliz_visual_collection,
+            text_collection=args.zilliz_text_collection,
+            vector_field=config.ZILLIZ_VECTOR_FIELD,
+            visual_pk_field=config.ZILLIZ_VISUAL_PK_FIELD,
+            text_pk_field=config.ZILLIZ_TEXT_PK_FIELD,
+            metric_type=config.ZILLIZ_METRIC_TYPE,
+            dimension=config.ZILLIZ_CLIP_DIM,
+        )
+        object_filter = ZillizObjectFilter(
+            retriever.client,
+            args.zilliz_object_collection,
+            retriever.meta_df,
+            pk_field=config.ZILLIZ_OBJECT_PK_FIELD,
+        )
+        LOGGER.info(
+            "Using Zilliz collections visual=%s text=%s object=%s with metadata=%s",
+            args.zilliz_visual_collection,
+            args.zilliz_text_collection,
+            args.zilliz_object_collection,
+            config.METADATA_PATH,
+        )
+    else:
+        encoder = QueryEncoder(config.CLIP_MODEL_NAME, config.CLIP_PRETRAINED, device=args.device)
+        retriever = RetrievalEngine(config.FAISS_INDEX_PATH, config.METADATA_PATH)
+        if retriever.index is None or retriever.meta_df is None:
+            raise RuntimeError("FAISS index and metadata are required before generating a submission")
+        object_filter = ObjectFilter(config.OBJECTS_PATH)
     frame_neighborhood = FrameNeighborhood(retriever.meta_df)
 
     needs_vqa = any(spec.query_type == "qa" for spec in specs)
@@ -226,8 +288,11 @@ def _build_tasks(args: argparse.Namespace, specs: list[QuerySpec]):
         message = "Fast KIS media-E5 assets are missing: " + ", ".join(str(path) for path in e5_missing)
         if args.require_kis_assets:
             raise FileNotFoundError(message)
-        LOGGER.warning("%s; retaining ViT-B/Qwen retrieval", message)
+        LOGGER.warning("%s; retaining primary embedding/Qwen retrieval", message)
 
+    if args.kis_profile == "full" and has_kis and args.retrieval_backend == "zilliz":
+        LOGGER.warning("--kis-profile full uses a legacy local index and is disabled with the Zilliz backend")
+        args.kis_profile = "fast"
     if args.kis_profile == "full" and has_kis:
         if not config.VITH_INDEX_PATH.exists():
             message = f"KIS full profile requires ViT-H index: {config.VITH_INDEX_PATH}"
@@ -392,7 +457,7 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
     directory = args.provenance_dir or args.output.with_suffix("").with_name(f"{args.output.stem}_provenance")
     directory.mkdir(parents=True, exist_ok=True)
     relevant_paths = {
-        "vitb_index": config.FAISS_INDEX_PATH,
+        "vitb_index": config.FAISS_INDEX_PATH if args.retrieval_backend == "faiss" else None,
         "metadata": config.METADATA_PATH,
         "vith_index": config.VITH_INDEX_PATH,
         "media_e5_index": config.MEDIA_TEXT_INDEX_PATH,
@@ -406,13 +471,24 @@ def _write_provenance(args: argparse.Namespace, specs: list[QuerySpec]) -> Path:
         "output_zip": str(args.output.resolve()),
         "query_ids": [spec.query_id for spec in specs],
         "models": {
-            "vitb": {"name": config.CLIP_MODEL_NAME, "pretrained": config.CLIP_PRETRAINED},
+            "primary_retrieval": {
+                "name": config.ZILLIZ_CLIP_MODEL_NAME if args.retrieval_backend == "zilliz" else config.CLIP_MODEL_NAME,
+                "pretrained": config.ZILLIZ_CLIP_PRETRAINED if args.retrieval_backend == "zilliz" else config.CLIP_PRETRAINED,
+            },
             "vith": {"name": config.VITH_MODEL_NAME, "pretrained": config.VITH_PRETRAINED},
             "e5": config.E5_MODEL_NAME,
             "qwen": "Qwen/Qwen2-VL-7B-Instruct",
             "translation": "facebook/mbart-large-50-many-to-many-mmt",
         },
         "config": {
+            "retrieval_backend": args.retrieval_backend,
+            "zilliz_collections": {
+                "visual": args.zilliz_visual_collection,
+                "text": args.zilliz_text_collection,
+                "object": args.zilliz_object_collection,
+            } if args.retrieval_backend == "zilliz" else None,
+            "metadata_path": str(config.METADATA_PATH),
+            "keyframes_dir": str(config.KEYFRAMES_DIR),
             "offline": args.offline,
             "kis_profile": args.kis_profile,
             "kis_baseline_simple": args.kis_baseline_simple,

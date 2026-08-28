@@ -76,7 +76,14 @@ class VQATask:
         return grouped
 
     def _analysis(self, question: str) -> dict[str, Any]:
-        default = {"retrieval_description": question, "vlm_question": question, "paraphrases": [], "metadata_queries": [], "ocr_queries": []}
+        default = {
+            "retrieval_description": question,
+            "vlm_question": question,
+            "paraphrases": [],
+            "metadata_queries": [],
+            "ocr_queries": [],
+            "objects_required": [],
+        }
         if self.vlm_pipeline is None:
             return default
         try:
@@ -87,6 +94,7 @@ class VQATask:
                 "paraphrases": self._unique([str(value) for value in raw.get("paraphrases", [])]),
                 "metadata_queries": self._unique([str(value) for value in raw.get("metadata_queries", [])]),
                 "ocr_queries": self._unique([str(value) for value in raw.get("ocr_queries", [])]),
+                "objects_required": self._unique([str(value) for value in raw.get("objects_required", [])]),
             }
         except Exception as exc:
             print(f"[VQA] Qwen analysis unavailable: {exc}")
@@ -117,6 +125,28 @@ class VQATask:
         videos = fuse_video_rankings(video_sources, rrf_k=config.VQA_RRF_K)[:config.VQA_VIDEO_BUDGET]
         ids = [str(video["video_id"]) for video in videos]
         local = self._local_source(retrieval_queries, ids, config.VQA_LOCAL_FRAME_BUDGET)
+        # Object detections are an independent rank signal. They never hard
+        # remove frames because the current object collection has partial
+        # video coverage; matching frames receive one extra RRF vote instead.
+        object_labels = list(analysis.get("objects_required") or [])
+        if self.semantic_filter is not None:
+            try:
+                object_labels = self._unique(
+                    [*object_labels, *self.semantic_filter.extract_objects(" ".join([english, *object_labels]))]
+                )
+            except Exception as exc:
+                print(f"[VQA] Semantic object mapping unavailable: {exc}")
+        matcher = getattr(self.object_filter, "matching_candidates", None)
+        if callable(matcher) and object_labels and local:
+            try:
+                object_rows = matcher(local, object_labels, require_all=False)
+                if object_rows:
+                    local = fuse_rankings(
+                        [("mobileclip_local", local), ("zilliz_object_detection", object_rows)],
+                        rrf_k=config.VQA_RRF_K,
+                    )
+            except Exception as exc:
+                print(f"[VQA] Object evidence unavailable; keeping MobileCLIP ranking: {exc}")
         if self.ocr is not None:
             try:
                 ocr_queries = self._unique([english, *analysis["ocr_queries"]])

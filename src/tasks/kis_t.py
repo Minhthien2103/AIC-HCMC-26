@@ -144,7 +144,7 @@ class KIStask:
         started = time.perf_counter()
         search_batch = getattr(retriever, "search_batch", None)
         values = search_batch(vectors, top_k=pool_size) if callable(search_batch) else [retriever.search(vector, top_k=pool_size) for vector in vectors]
-        print(f"[KIS] {source_name} variants={len(variants)} encode={encode_seconds:.2f}s faiss={time.perf_counter()-started:.2f}s pool={pool_size}")
+        print(f"[KIS] {source_name} variants={len(variants)} encode={encode_seconds:.2f}s retrieval={time.perf_counter()-started:.2f}s pool={pool_size}")
         return values
 
     @staticmethod

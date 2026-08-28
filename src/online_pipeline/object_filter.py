@@ -32,6 +32,37 @@ class ObjectFilter:
         if self.object_df is not None:
             return self.object_df["object_label"].unique().to_list()
         return []
+
+    def matching_candidates(
+        self,
+        candidates: list[dict],
+        required_objects: list[str],
+        *,
+        require_all: bool = False,
+    ) -> list[dict]:
+        """Return candidates backed by object detections, preserving input rank."""
+        if self.object_df is None or not candidates or not required_objects:
+            return []
+        required = {value.strip().casefold() for value in required_objects if value.strip()}
+        if not required:
+            return []
+        indices = [candidate["faiss_idx"] for candidate in candidates]
+        rows = self.object_df.filter(pl.col("faiss_idx").is_in(indices))
+        lookup = {
+            row["faiss_idx"]: {str(label).casefold() for label in row["found_objects"]}
+            for row in rows.group_by("faiss_idx")
+            .agg(pl.col("object_label").unique().alias("found_objects"))
+            .to_dicts()
+        }
+        output = []
+        for candidate in candidates:
+            found = lookup.get(candidate["faiss_idx"], set())
+            overlap = required.intersection(found)
+            if (overlap == required if require_all else bool(overlap)):
+                item = candidate.copy()
+                item["matched_objects"] = sorted(overlap)
+                output.append(item)
+        return output
             
     def filter_candidates(self, candidates: list[dict], required_objects: list[str], mode: str = "boost") -> list[dict]:
         if not required_objects or not candidates:

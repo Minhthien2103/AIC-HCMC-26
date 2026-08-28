@@ -21,7 +21,7 @@ _INLINE_EVENT_RE = re.compile(
     r"(?<!\w)(?:\(\s*(?P<paren>\d+)\s*\)|(?P<plain>\d+)[.)])\s*"
 )
 _EVENT_LABEL_RE = re.compile(
-    r"(?im)^\s*e\s*(?P<number>\d+)(?:\s*[:.)-]\s*|\s+)"
+    r"(?im)^\s*(?:e|cảnh|canh)\s*(?P<number>\d+)(?:\s*[:.)-]\s*|\s+)"
 )
 
 
@@ -201,7 +201,7 @@ def _parse_inline_numbered_events(text: str) -> tuple[str, list[str]]:
 
 
 def _parse_labelled_events(text: str) -> tuple[str, list[str]]:
-    """Parse BTC's ``E1: ...`` or ``E1 ...`` form without trusting labels.
+    """Parse BTC's ``E1: ...``/``Cảnh 1: ...`` form without trusting labels.
 
     The official practice pack contains a duplicated ``E2`` label in one
     TRAKE query.  Labels therefore delimit events, while document order is the

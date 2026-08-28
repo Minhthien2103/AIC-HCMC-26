@@ -6,6 +6,34 @@ the same as a Codabench code submission.
 
 ## CUDA/Colab setup
 
+For SOTUYEN2 with the production MobileCLIP collections, open
+[`notebook/run_sotuyen2_zilliz_colab.ipynb`](notebook/run_sotuyen2_zilliz_colab.ipynb)
+in Colab. Put `ZILLIZ_URI` and `ZILLIZ_TOKEN` in **Colab Secrets** and enable
+Notebook access; never paste the token into a committed file. The notebook
+contains the Drive path cell, a preflight for all three collections and a
+resumable 30-query command.
+
+The equivalent CLI contract is:
+
+```bash
+export ZILLIZ_URI='https://<cluster-endpoint>'
+export ZILLIZ_TOKEN='<api-key>'
+python scripts/generate_submission.py \
+  --queries-dir /path/to/SOTUYEN2-bo-de-thi \
+  --output outputs/SOTUYEN2_submission.zip \
+  --retrieval-backend zilliz \
+  --metadata-path /path/to/zilliz_exports/metadata.parquet \
+  --keyframes-dir /path/to/keyframes \
+  --device cuda --vlm-mode 4bit
+```
+
+The Zilliz backend uses `MobileCLIP-S2`/`datacompdr` for both visual and
+subtitle vector search. Subtitle hits are mapped through `text_pks` (or the
+same nearest-timestamp rule used when generating canonical metadata). Object
+detections add an independent VQA rank vote and do not remove candidates from
+videos whose object extraction is not available yet. Use
+`--retrieval-backend faiss` only for the legacy local index.
+
 For the current SOTUYEN1 pack and a two-hour A100 deadline, follow
 [`COLAB_SOTUYEN1_A100.md`](COLAB_SOTUYEN1_A100.md). It stages Drive assets on
 the local SSD and provides standard/emergency resumable profiles.
@@ -21,7 +49,7 @@ loading Qwen2-VL.
 
 ## KIS final-run assets (GPU, video-first)
 
-The default `fast` profile uses the existing ViT-B/32 index, official BTC
+The legacy FAISS `fast` profile uses the existing ViT-B/32 index, official BTC
 media metadata embedded with multilingual E5, candidate-only OCR, local mBART
 translation and Qwen2-VL. It retrieves videos first, then localises frames in
 the selected videos and creates bounded frame-neighbourhood proposals from
