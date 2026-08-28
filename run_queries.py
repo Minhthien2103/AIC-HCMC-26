@@ -122,6 +122,7 @@ def build_pipeline(args: argparse.Namespace):
             text_pk_field=config.ZILLIZ_TEXT_PK_FIELD,
             metric_type=config.ZILLIZ_METRIC_TYPE,
             dimension=config.ZILLIZ_CLIP_DIM,
+            keyframes_dir=config.KEYFRAMES_DIR,
         )
         object_filter = ZillizObjectFilter(
             retriever.client,

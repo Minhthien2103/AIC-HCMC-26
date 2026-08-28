@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from src import config
 from src.online_pipeline.rank_fusion import fuse_rankings
 
 
@@ -116,6 +117,7 @@ class ZillizRetrievalEngine:
         text_pk_field: str = "pk",
         metric_type: str = "COSINE",
         dimension: int = 512,
+        keyframes_dir: str | Path | None = None,
         client=None,
     ):
         self.uri = str(uri or "").strip()
@@ -125,6 +127,10 @@ class ZillizRetrievalEngine:
         self.visual_pk_field = str(visual_pk_field)
         self.text_pk_field = str(text_pk_field)
         self.metric_type = str(metric_type).upper()
+        self.keyframes_dir = (
+            Path(keyframes_dir).expanduser() if keyframes_dir is not None else None
+        )
+        self._local_keyframe_cache: dict[str, bool] = {}
         self.meta_df = load_canonical_metadata(metadata_path)
         self.index = _IndexInfo(ntotal=self.meta_df.height, d=int(dimension))
 
@@ -199,6 +205,19 @@ class ZillizRetrievalEngine:
             self._video_rows.setdefault(video_id, []).append(canonical)
         for video_rows in self._video_rows.values():
             video_rows.sort(key=lambda row: int(row["frame_id"]))
+
+    def _has_local_keyframe(self, candidate: dict[str, Any]) -> bool:
+        if self.keyframes_dir is None:
+            return True
+        identity = str(candidate.get("frame_key") or "")
+        if identity not in self._local_keyframe_cache:
+            path = config.keyframe_path(
+                str(candidate["video_id"]),
+                str(candidate["keyframe_name"]),
+                root=self.keyframes_dir,
+            )
+            self._local_keyframe_cache[identity] = path.is_file()
+        return self._local_keyframe_cache[identity]
 
     @staticmethod
     def _entity(hit: Any) -> tuple[dict[str, Any], Any, float]:
@@ -334,21 +353,27 @@ class ZillizRetrievalEngine:
             raise ValueError(f"Query vectors must have shape (N, {self.index.d}), got {vectors.shape}")
         if vectors.shape[0] == 0:
             return []
-        limit = min(max(0, int(top_k)), self.index.ntotal)
-        if limit == 0:
+        requested_limit = min(max(0, int(top_k)), self.index.ntotal)
+        if requested_limit == 0:
             return [[] for _ in range(vectors.shape[0])]
+        search_limit = requested_limit
+        if self.keyframes_dir is not None:
+            search_limit = min(
+                self.index.ntotal,
+                max(requested_limit * 3, requested_limit + 32),
+            )
         expression = f"video_id == {json.dumps(video_id)}" if video_id is not None else ""
         visual_raw = self._search_collection(
             self.visual_collection,
             vectors,
-            limit=limit,
+            limit=search_limit,
             output_fields=[self.visual_pk_field, *self.VISUAL_OUTPUT_FIELDS],
             filter_expression=expression,
         )
         text_raw = self._search_collection(
             self.text_collection,
             vectors,
-            limit=limit,
+            limit=search_limit,
             output_fields=[self.text_pk_field, *self.TEXT_OUTPUT_FIELDS],
             filter_expression=expression,
         )
@@ -368,5 +393,11 @@ class ZillizRetrievalEngine:
                 [("zilliz_visual", visual), ("zilliz_subtitle", text)],
                 rrf_k=60,
             )
-            output.append(fused[:limit])
+            available = []
+            for candidate in fused:
+                if self._has_local_keyframe(candidate):
+                    available.append(candidate)
+                    if len(available) >= requested_limit:
+                        break
+            output.append(available)
         return output

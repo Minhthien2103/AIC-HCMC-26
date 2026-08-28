@@ -56,6 +56,7 @@ def main() -> int:
         text_pk_field=config.ZILLIZ_TEXT_PK_FIELD,
         metric_type=config.ZILLIZ_METRIC_TYPE,
         dimension=config.ZILLIZ_CLIP_DIM,
+        keyframes_dir=args.keyframes_dir,
     )
     ZillizObjectFilter(
         retriever.client,
@@ -79,10 +80,15 @@ def main() -> int:
         for row in sample_rows
         if not _keyframe_path(keyframe_root, row["video_id"], row["keyframe_name"]).is_file()
     ]
-    if missing:
+    if len(missing) == len(sample_rows):
         preview = "\n".join(f"  - {path}" for path in missing[:5])
         raise FileNotFoundError(
             f"Keyframe path does not match canonical metadata ({len(missing)}/{len(sample_rows)} samples missing):\n{preview}"
+        )
+    if missing:
+        print(
+            f"Keyframe warning: {len(missing)}/{len(sample_rows)} sampled canonical frames "
+            "are absent locally and will be skipped during retrieval."
         )
 
     if args.queries_dir is not None:
@@ -102,7 +108,7 @@ def main() -> int:
         f"(visual={args.visual_collection}, text={args.text_collection}, object={args.object_collection})"
     )
     print(f"Mapped smoke result: {candidates[0]['frame_key']}")
-    print(f"Keyframes: {len(sample_rows)} sampled paths found")
+    print(f"Keyframes: {len(sample_rows) - len(missing)}/{len(sample_rows)} sampled paths found")
     print("Setup validation: PASSED")
     return 0
 
