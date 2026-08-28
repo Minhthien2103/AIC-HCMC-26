@@ -33,8 +33,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _keyframe_path(root: Path, video_id: str, name: str) -> Path:
-    value = str(name)
-    return root / str(video_id) / (value if Path(value).suffix else f"{value}.jpg")
+    return config.keyframe_path(video_id, name, root=root)
 
 
 def main() -> int:

@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 
@@ -119,9 +120,41 @@ TRAKE_EVENT_TOP_K = 16
 TRAKE_QWEN_PER_EVENT = 6
 
 
-def keyframe_path(video_id: str, keyframe_name: str) -> Path:
-    """Resolve a keyframe against the current checkout, never stale Parquet paths."""
-    return KEYFRAMES_DIR / str(video_id) / f"{str(keyframe_name).removesuffix('.jpg')}.jpg"
+def keyframe_path(
+    video_id: str,
+    keyframe_name: str,
+    *,
+    root: str | Path | None = None,
+) -> Path:
+    """Resolve both Zilliz and legacy archive keyframe filenames.
+
+    The MobileCLIP collection uses names such as ``frame_000008.jpg`` while
+    the 28.4 GB keyframe archive stores the same image as ``008.jpg``.  Prefer
+    an exact filename when it exists, then try the legacy numeric name without
+    requiring a second copy of the image archive.
+    """
+    keyframe_root = Path(root) if root is not None else KEYFRAMES_DIR
+    video_dir = keyframe_root / str(video_id)
+    source_name = Path(str(keyframe_name)).name
+    source_path = Path(source_name)
+    exact_name = source_name if source_path.suffix else f"{source_name}.jpg"
+    candidates = [video_dir / exact_name]
+
+    match = re.fullmatch(r"frame_(\d+)", source_path.stem, flags=re.IGNORECASE)
+    if match:
+        frame_number = int(match.group(1))
+        candidates.extend(
+            [
+                video_dir / f"{frame_number:03d}.jpg",
+                video_dir / f"{frame_number:06d}.jpg",
+                video_dir / f"{frame_number}.jpg",
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
 
 # TRAKE
 TRAKE_VLM_TOP_K = 30
