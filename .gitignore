@@ -238,3 +238,6 @@ submission/
 CheckList.md
 Thongtin.md
 docs/
+
+docker_data/
+*.bat

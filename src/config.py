@@ -44,7 +44,11 @@ OBJECT_BOOST_WEIGHT = 0.3
 # ── KIS GPU retrieval / re-ranking ─────────────────────────────────────────
 # These values are intentionally configurable rather than hidden inside the
 # task implementation, so trial submissions can be reproduced and ablated.
+KIS_CANDIDATES_PER_VARIANT = 1000
 KIS_RRF_K = 60
+
+# Keep the dual-retrieval settings used by the local KIS pipeline available
+# alongside the dev-branch defaults.
 
 # ── KIS dual-retrieval assets ──────────────────────────────────────────────
 # All values are exposed as CLI defaults rather than semantic query rules.
@@ -66,6 +70,8 @@ KIS_VIDEO_BUDGET = 24
 KIS_LOCAL_FRAME_BUDGET = 48
 KIS_QUERY_VARIANT_LIMIT = 4
 FRAME_NEIGHBORHOOD_COUNT = 7
+KIS_VLM_TOP_K = 100
+KIS_VLM_PROMOTE_MIN_SCORE = 2
 
 # ── Temporal search ───────────────────────────────────────────────────────────
 TEMPORAL_WINDOW = 20
@@ -76,9 +82,9 @@ TEMPORAL_KEYWORDS = [
 ]
 
 # VQA Pipeline Config (Improvements #3, #5, #7, #8, #9, #11, #12)
-VQA_CANDIDATES = 30                # FAISS candidates per query before RRF
-VQA_RERANK_K = 5                   # Top-K candidates passed to VLM for answer
-VQA_PARAPHRASE_N = 2               # Number of paraphrases for RRF
+VQA_CANDIDATES = 100                # FAISS candidates per query before RRF
+VQA_RERANK_K = 15                   # Top-K candidates passed to VLM for answer
+VQA_PARAPHRASE_N = 5               # Number of paraphrases for RRF
 VQA_VERIFICATION_BOOST = 0.15      # Score boost for VLM-verified frames (Improvement #5)
 VQA_RRF_K = 60                     # RRF constant k
 SEMANTIC_OBJ_THRESHOLD = 0.55      # MiniLM cosine similarity threshold (Improvement #9)
@@ -101,3 +107,21 @@ TRAKE_QWEN_PER_EVENT = 6
 def keyframe_path(video_id: str, keyframe_name: str) -> Path:
     """Resolve a keyframe against the current checkout, never stale Parquet paths."""
     return KEYFRAMES_DIR / str(video_id) / f"{str(keyframe_name).removesuffix('.jpg')}.jpg"
+
+# TRAKE
+TRAKE_VLM_TOP_K = 30
+TRAKE_VLM_PROMOTE_MIN_SCORE = 2
+
+# ── Vector Database ─────────────────────────────────────────────────────
+ZILLIZ_URI   = "https://your-cluster.api.zillizcloud.com"
+ZILLIZ_TOKEN = "your-zilliz-api-key"
+MILVUS_COLLECTION = "aic_captions"
+
+# ── RAG (Text-based semantic search) ────────────────────────────────────  
+SUPABASE_URL   = "https://your-project.supabase.co"
+SUPABASE_KEY   = "your-anon-key"  # For vector similarity search
+SUPABASE_TOKEN = "your-service-role-key"  # For FTS queries (NOT needed if using stored tsvector)
+
+# The table we created in init_db.py
+RAG_TABLE_NAME = "aic_captions"
+SUPABASE_KEY = "your-supabase-anon-key"

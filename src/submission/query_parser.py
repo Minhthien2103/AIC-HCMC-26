@@ -128,12 +128,19 @@ def _parse_text(path: Path, query_type: str) -> QuerySpec:
                 if events_value:
                     events.extend(_split_events(events_value))
                 continue
-            if after_events:
-                value = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip()
+                
+            # Match explicit event lines like "E1 Khoảnh khắc đầu tiên..."
+            explicit_e = re.match(r"^\s*[Ee]\d+\s+(.*)", line)
+            
+            if explicit_e:
+                events.append(explicit_e.group(1).strip())
+            elif after_events:
+                value = re.sub(r"^\s*(?:[-* ]|\d+[.)])\s*", "", line).strip()
                 if value:
                     events.append(value)
             else:
                 before_events.append(line)
+                
         description = "\n".join(before_events).strip() or text
         if not events:
             blocks = _blocks(text)

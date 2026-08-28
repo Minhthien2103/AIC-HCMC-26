@@ -256,6 +256,30 @@ class VLMPipeline:
         details = self.score_kis_match_details(image_path, original_query, must_have)
         return int(details["score"]) if details is not None else None
 
+    def read_text_in_image(self, image_path: str, question: str, lang: str = "vi") -> str:
+        """OCR-mode: ask VLM to read and transcribe visible text relevant to the question."""
+        from PIL import Image
+        lang_out = "Vietnamese" if lang == "vi" else "English"
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Question: {question}\n"
+                    "First, accurately transcribe ALL text visible in this image, paying attention to banners, signs, and posters. "
+                    f"Then, use the transcribed text to answer the question concisely in {lang_out}. "
+                    "If no relevant text is visible, output ONLY: not visible."
+                )},
+            ],
+        }]
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGB")
+            return self._generate_text(self._prepare(messages, image), max_new_tokens=128)
+        except Exception as exc:
+            print(f"[VLM] OCR error for {image_path}: {exc}")
+            return "not visible"
+
     def analyze_vqa_query(self, english_question: str) -> dict:
         prompt = (
             "Analyze the question and output ONLY valid JSON with keys "
