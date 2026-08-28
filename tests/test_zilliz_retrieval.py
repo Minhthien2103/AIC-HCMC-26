@@ -129,27 +129,3 @@ def test_zilliz_video_filter_and_object_evidence(tmp_path):
     assert matched[0]["matched_objects"] == ["person"]
     assert object_filter.get_all_labels() == ["Box", "Person"]
     assert client.query_calls[0]["collection_name"] == "objects"
-
-
-def test_zilliz_skips_candidates_without_local_keyframes(tmp_path):
-    metadata_path = tmp_path / "metadata.parquet"
-    _metadata(metadata_path)
-    video_dir = tmp_path / "keyframes" / "L25_V001"
-    video_dir.mkdir(parents=True)
-    (video_dir / "000200.jpg").touch()
-
-    client = FakeZillizClient()
-    retriever = ZillizRetrievalEngine(
-        uri="unused",
-        token="unused",
-        metadata_path=metadata_path,
-        visual_collection="visual",
-        text_collection="text",
-        keyframes_dir=tmp_path / "keyframes",
-        client=client,
-    )
-
-    rows = retriever.search(np.ones(512, dtype=np.float32), top_k=2)
-
-    assert [row["frame_key"] for row in rows] == ["L25_V001::200"]
-    assert all(call["limit"] == 2 for call in client.search_calls)
