@@ -134,10 +134,28 @@ class VLMPipeline:
             "confidence": confidence,
         }
 
-    def answer_question(self, image_path: str, question: str) -> str:
+    def answer_question(self, image_path: str, question: str, lang: str = "vi") -> str:
         """Compatibility wrapper used by older UI paths."""
         details = self.answer_question_details(image_path, question)
         return str(details.get("answer", "")) if details else ""
+
+    def read_text_in_image(self, image_path: str, question: str, lang: str = "vi") -> str:
+        """OCR-mode: ask VLM to read and transcribe visible text relevant to the question."""
+        image = Image.open(image_path).convert("RGB")
+        lang_out = "Vietnamese" if lang == "vi" else "English"
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": (
+                    f"Question: {question}\n"
+                    "First, accurately transcribe ALL text visible in this image, paying attention to banners, signs, and posters. "
+                    f"Then, use the transcribed text to answer the question concisely in {lang_out}. "
+                    "If no relevant text is visible, output ONLY: not visible."
+                )},
+            ],
+        }]
+        return self._generate_text(self._prepare(messages, image), max_new_tokens=128)
 
     def extract_events(self, video_desc: str) -> list[str]:
         messages = [{
