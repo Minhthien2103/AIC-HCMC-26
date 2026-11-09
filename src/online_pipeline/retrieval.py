@@ -43,37 +43,52 @@ class RetrievalEngine:
 
 
     def search(self, query_vector: np.ndarray, top_k: int = 100) -> list[dict]:
+        results = self.search_batch(query_vector, top_k=top_k)
+        return results[0] if results else []
+
+    def search_batch(self, query_vectors: np.ndarray, top_k: int = 100) -> list[list[dict]]:
+        """Search multiple text vectors in one FAISS call.
+
+        FAISS remains CPU-backed in Colab, while batching removes Python-call
+        overhead after CLIP encodes all query variants on CUDA.
+        """
         if self.index is None or self.meta_df is None:
             return []
 
-        query_vector = query_vector.astype('float32').reshape(1, -1)
-        if query_vector.shape[1] != self.index.d:
-            raise ValueError(f"Query dimension {query_vector.shape[1]} != index dimension {self.index.d}")
+        query_vectors = np.asarray(query_vectors, dtype="float32")
+        if query_vectors.ndim == 1:
+            query_vectors = query_vectors.reshape(1, -1)
+        if query_vectors.ndim != 2:
+            raise ValueError(f"Query vectors must be 2D, got shape {query_vectors.shape}")
+        if query_vectors.shape[1] != self.index.d:
+            raise ValueError(f"Query dimension {query_vectors.shape[1]} != index dimension {self.index.d}")
         top_k = max(0, min(int(top_k), int(self.index.ntotal)))
-        if top_k == 0:
+        if top_k == 0 or query_vectors.shape[0] == 0:
             return []
-        scores, faiss_indices = self.index.search(query_vector, top_k)
-
-        list_result = []
-
-        for i in range(top_k):
-            f_idx = int(faiss_indices[0][i])
-            score = float(scores[0][i])
-
-            if f_idx == -1:
-                continue
-
-            row = self.meta_df.row(f_idx, named = True)
-            row["score"] = score
-
-            list_result.append(row)
-
-        return list_result
+        scores, faiss_indices = self.index.search(query_vectors, top_k)
+        results: list[list[dict]] = []
+        for row_scores, row_indices in zip(scores, faiss_indices):
+            ranked: list[dict] = []
+            for score, index in zip(row_scores, row_indices):
+                f_idx = int(index)
+                if f_idx == -1:
+                    continue
+                row = self.meta_df.row(f_idx, named=True)
+                row["score"] = float(score)
+                ranked.append(row)
+            results.append(ranked)
+        return results
 
 
     def search_in_video(self, query_vector: np.ndarray, video_id: str, top_k: int = 5) -> list[dict]:
+        ranked = self.search_in_video_batch(query_vector, video_id=video_id, top_k=top_k)
+        return ranked[0] if ranked else []
+
+
+    def search_in_video_batch(self, query_vectors: np.ndarray, video_id: str, top_k: int = 5) -> list[list[dict]]:
+        """Search one video's vectors once for many query variants."""
         if self.index is None or self.meta_df is None:
-            return[]
+            return []
 
         vid_meta = self.meta_df.filter(pl.col("video_id") == video_id)
         if vid_meta.height == 0:
@@ -83,18 +98,23 @@ class RetrievalEngine:
         faiss_indices = vid_meta["faiss_idx"].to_list()
         vid_vectors = np.array([self.index.reconstruct(i) for i in faiss_indices])
 
-        query_vector = query_vector.astype("float32").reshape(-1)
-        if query_vector.shape[0] != self.index.d:
-            raise ValueError(f"Query dimension {query_vector.shape[0]} != index dimension {self.index.d}")
-        scores = np.dot(vid_vectors, query_vector)
+        vectors = np.asarray(query_vectors, dtype="float32")
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+        if vectors.ndim != 2 or vectors.shape[1] != self.index.d:
+            shape = vectors.shape[1] if vectors.ndim == 2 else vectors.shape
+            raise ValueError(f"Query dimension {shape} != index dimension {self.index.d}")
         top_k = max(0, min(int(top_k), vid_meta.height))
-        top_indices = np.argsort(scores)[::-1][:top_k]
-
-        list_result = []
-
-        for i in top_indices:
-            row = vid_meta.row(i, named = True)
-            row["score"] = float(scores[i])
-            list_result.append(row)
-
-        return list_result
+        if top_k == 0:
+            return [[] for _ in range(vectors.shape[0])]
+        scores = np.dot(vectors, vid_vectors.T)
+        output: list[list[dict]] = []
+        for row_scores in scores:
+            top_indices = np.argsort(row_scores)[::-1][:top_k]
+            ranked: list[dict] = []
+            for index in top_indices:
+                row = vid_meta.row(int(index), named=True)
+                row["score"] = float(row_scores[index])
+                ranked.append(row)
+            output.append(ranked)
+        return output

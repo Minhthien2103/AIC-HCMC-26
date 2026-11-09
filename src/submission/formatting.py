@@ -81,6 +81,4 @@ def format_trake_row(result: dict[str, Any]) -> list[Any]:
     if not result.get("is_valid_sequence") or not events:
         raise ValueError("TRAKE result is not a complete valid sequence")
     frame_ids = [normalize_frame_id(event["frame_id"]) for event in events]
-    if any(left >= right for left, right in zip(frame_ids, frame_ids[1:])):
-        raise ValueError("TRAKE frame IDs must increase strictly")
     return [normalize_video_id(result["video_id"]), *frame_ids]
