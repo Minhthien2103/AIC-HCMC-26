@@ -1,4 +1,9 @@
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -80,15 +85,16 @@ TRAKE_VLM_TOP_K = 30
 TRAKE_VLM_PROMOTE_MIN_SCORE = 2
 
 # ── Vector Database ─────────────────────────────────────────────────────
-ZILLIZ_URI   = "https://your-cluster.api.zillizcloud.com"
-ZILLIZ_TOKEN = "your-zilliz-api-key"
+ZILLIZ_URI_RECAP   = os.getenv("ZILLIZ_URI_RECAP", "")
+ZILLIZ_TOKEN_RECAP = os.getenv("ZILLIZ_TOKEN_RECAP", "")
 MILVUS_COLLECTION = "aic_captions"
 
 # ── RAG (Text-based semantic search) ────────────────────────────────────  
-SUPABASE_URL   = "https://your-project.supabase.co"
-SUPABASE_KEY   = "your-anon-key"  # For vector similarity search
-SUPABASE_TOKEN = "your-service-role-key"  # For FTS queries (NOT needed if using stored tsvector)
+SUPABASE_URL_RECAP   = os.getenv("SUPABASE_URL_RECAP", "")
+SUPABASE_KEY_RECAP   = os.getenv("SUPABASE_KEY_RECAP", "")  # For vector similarity search
+SUPABASE_TOKEN_RECAP = os.getenv("SUPABASE_TOKEN_RECAP", "")  # For FTS queries (NOT needed if using stored tsvector)
 
 # The table we created in init_db.py
 RAG_TABLE_NAME = "aic_captions"
-SUPABASE_KEY = "your-supabase-anon-key"
+SUBTITLES_JSON_PATH = DATA_DIR / "extracted_subtitles" / "all_subtitles.json"
+JPEG_SIZE_DIR = DATA_DIR / "jpeg_sizes"

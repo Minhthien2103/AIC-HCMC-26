@@ -1,10 +1,10 @@
 """
-Stage 7 - Embed captions with MobileCLIP text encoder and ingest into Milvus + ElasticSearch.
+Stage 7 - Embed captions with MobileCLIP text encoder and ingest into Zilliz (Milvus) + Supabase (PostgreSQL).
 Input:  data/captions.parquet
         data/shot_summaries.parquet
         data/video_summaries.parquet
 Output: Milvus collection 'aic_captions' (vectors)
-        ElasticSearch index 'aic_captions' (text)
+        Supabase table 'aic_captions' (text)
 """
 import os, sys
 from pathlib import Path
@@ -13,18 +13,17 @@ import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
 from src import config
 
-MILVUS_URI = os.getenv("MILVUS_URI", config.MILVUS_URI)
-ES_URL     = os.getenv("ES_URL",     config.ES_URL)
+ZILLIZ_URI   = os.getenv("ZILLIZ_URI_RECAP",   getattr(config, "ZILLIZ_URI_RECAP", ""))
+ZILLIZ_TOKEN = os.getenv("ZILLIZ_TOKEN_RECAP", getattr(config, "ZILLIZ_TOKEN_RECAP", ""))
 
 CAPTIONS_PATH       = config.DATA_DIR / "captions.parquet"
 SHOT_SUMMARIES_PATH = config.DATA_DIR / "shot_summaries.parquet"
 VIDEO_SUMMARIES_PATH = config.DATA_DIR / "video_summaries.parquet"
 
 MILVUS_COLLECTION = "aic_captions"
-ES_INDEX          = "aic_captions"
 BATCH_SIZE        = 256
 
 
@@ -55,12 +54,17 @@ def _load_clip_text_encoder():
         raise
 
 
-def _ingest_milvus(df: pd.DataFrame, encode_fn):
+def _ingest_zilliz(df: pd.DataFrame, encode_fn):
     from pymilvus import MilvusClient
-    client = MilvusClient(uri=MILVUS_URI)
+    
+    if not ZILLIZ_URI or "your-zilliz" in ZILLIZ_URI:
+        print("[Stage7] Zilliz URI not configured. Skipping Zilliz ingestion.")
+        return
+
+    client = MilvusClient(uri=ZILLIZ_URI, token=ZILLIZ_TOKEN)
 
     if not client.has_collection(MILVUS_COLLECTION):
-        print(f"[Stage7] Collection not found. Run init_db.py first.")
+        print(f"[Stage7] Zilliz Collection not found. Run init_db.py first.")
         return
 
     total = 0
@@ -81,16 +85,22 @@ def _ingest_milvus(df: pd.DataFrame, encode_fn):
         ]
         client.insert(collection_name=MILVUS_COLLECTION, data=data)
         total += len(data)
-        print(f"  [Milvus] Inserted {total}/{len(df)}")
+        print(f"  [Zilliz] Inserted {total}/{len(df)}")
 
-    print(f"[Stage7] Milvus ingestion done. {total} vectors inserted.")
+    print(f"[Stage7] Zilliz ingestion done. {total} vectors inserted.")
 
 
-def _ingest_elasticsearch(df_cap: pd.DataFrame, df_shots: pd.DataFrame, df_vids: pd.DataFrame):
-    from elasticsearch import Elasticsearch
-    from elasticsearch.helpers import bulk
-
-    es = Elasticsearch(ES_URL)
+def _ingest_supabase(df_cap: pd.DataFrame, df_shots: pd.DataFrame, df_vids: pd.DataFrame):
+    from supabase import create_client, Client
+    
+    SUPABASE_URL = os.getenv("SUPABASE_URL_RECAP", getattr(config, "SUPABASE_URL_RECAP", ""))
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY_RECAP", getattr(config, "SUPABASE_KEY_RECAP", ""))
+    
+    if not SUPABASE_URL or "your-project" in SUPABASE_URL:
+        print("[Stage7] Supabase URL not configured. Skipping Supabase ingestion.")
+        return
+        
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     # Build lookup tables
     shot_summary_map = {}
@@ -103,27 +113,32 @@ def _ingest_elasticsearch(df_cap: pd.DataFrame, df_shots: pd.DataFrame, df_vids:
         for row in df_vids.itertuples():
             vid_summary_map[row.video_id] = str(row.summary)
 
-    def _actions():
-        for row in df_cap.itertuples():
-            vid = row.video_id
-            shot_id = int(getattr(row, "shot_id", 0))
-            yield {
-                "_index": ES_INDEX,
-                "_id":    f"{vid}_{row.keyframe_name}",
-                "_source": {
-                    "video_id":      vid,
-                    "keyframe_name": str(row.keyframe_name),
-                    "shot_id":       shot_id,
-                    "caption":       str(row.caption) if row.caption else "",
-                    "shot_summary":  shot_summary_map.get((vid, shot_id), ""),
-                    "video_summary": vid_summary_map.get(vid, ""),
-                    "transcript":    "",  # Filled when transcripts.parquet exists
-                    "objects":       "",  # Filled by YOLO pipeline
-                }
-            }
+    rows = []
+    for row in df_cap.itertuples():
+        vid = row.video_id
+        shot_id = int(getattr(row, "shot_id", 0))
+        rows.append({
+            "video_id":      vid,
+            "keyframe_name": str(row.keyframe_name),
+            "shot_id":       shot_id,
+            "caption":       str(row.caption) if row.caption else "",
+            "shot_summary":  shot_summary_map.get((vid, shot_id), ""),
+            "video_summary": vid_summary_map.get(vid, ""),
+            "transcript":    "",  # Filled when transcripts.parquet exists
+            "objects":       "",  # Filled by YOLO pipeline
+        })
 
-    success, failed = bulk(es, _actions(), raise_on_error=False)
-    print(f"[Stage7] ES ingestion done. {success} ok, {failed} failed.")
+    # Upsert in chunks to avoid hitting payload limits
+    chunk_size = 500
+    for i in range(0, len(rows), chunk_size):
+        batch = rows[i:i+chunk_size]
+        try:
+            supabase.table("aic_captions").upsert(batch).execute()
+            print(f"  [Supabase] Inserted {min(i+chunk_size, len(rows))}/{len(rows)} rows.")
+        except Exception as e:
+            print(f"  [Supabase] Insert error: {e}")
+
+    print(f"[Stage7] Supabase ingestion done.")
 
 
 def run_stage7():
@@ -135,11 +150,11 @@ def run_stage7():
     df_shots = pd.read_parquet(SHOT_SUMMARIES_PATH) if SHOT_SUMMARIES_PATH.exists() else None
     df_vids  = pd.read_parquet(VIDEO_SUMMARIES_PATH) if VIDEO_SUMMARIES_PATH.exists() else None
 
-    print(f"[Stage7] Ingesting {len(df_cap)} keyframes into Milvus and ElasticSearch...")
+    print(f"[Stage7] Ingesting {len(df_cap)} keyframes...")
 
     encode_fn = _load_clip_text_encoder()
-    _ingest_milvus(df_cap, encode_fn)
-    _ingest_elasticsearch(df_cap, df_shots, df_vids)
+    _ingest_zilliz(df_cap, encode_fn)
+    _ingest_supabase(df_cap, df_shots, df_vids)
 
     print("[Stage7] Done.")
 

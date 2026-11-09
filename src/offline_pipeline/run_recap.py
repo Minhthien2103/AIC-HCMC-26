@@ -24,9 +24,11 @@ def main():
                         help="Which stages to run (default: 4 5 6 7)")
     parser.add_argument("--videos", nargs="*", default=None,
                         help="Specific video IDs to process (default: all)")
-    parser.add_argument("--no-resume", action="store_true",
+    parser.add_argument("--no-resume", action="store_true", default=True,
                         help="Start fresh, ignore existing checkpoints")
-    parser.add_argument("--local", action="store_true", help="Use local VLM (Qwen2-VL) instead of Gemini API")
+    parser.add_argument("--local", action="store_true", default=True, 
+                        help="Use local VLM (Qwen2-VL) instead of Gemini API")
+    
     args = parser.parse_args()
 
     resume = not args.no_resume
@@ -41,25 +43,26 @@ def main():
 
     if 4 in stages:
         print("\n── Stage 4: Keyframe Captioning ──")
-        from src.offline_pipeline.ReCap.4_keyframe_caption import run_stage4
+        from src.offline_pipeline.ReCap.s4_kf_caption import run_stage4
         run_stage4(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 5 in stages:
         print("\n── Stage 5: Shot-Level Temporal Memory ──")
-        from src.offline_pipeline.ReCap.5_shot_caption import run_stage5
+        from src.offline_pipeline.ReCap.s5_shot_caption import run_stage5
         run_stage5(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 6 in stages:
         print("\n── Stage 6: Video-Level Summary ──")
-        from src.offline_pipeline.ReCap.6_video_summary import run_stage6
+        from src.offline_pipeline.ReCap.s6_video_caption import run_stage6
         run_stage6(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 7 in stages:
         print("\n── Stage 7: Embed + Ingest to Milvus & ElasticSearch ──")
-        from src.offline_pipeline.ReCap.7_embed import run_stage7
+        from src.offline_pipeline.ReCap.s7_embed import run_stage7
         run_stage7()
 
     print("\n✓ ReCap pipeline complete.")
 
 if __name__ == "__main__":
     main()
+    # d:\STUDY\BIN\CS\PROJECT\AIC-HCMC-26\data\keyframes\dake_output/L22_V009/keyframes/frame_013480.jpg

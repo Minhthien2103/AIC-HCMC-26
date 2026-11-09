@@ -7,14 +7,21 @@ import os, sys, time
 from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 load_dotenv()
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
 from src import config
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = genai.GenerativeModel("gemini-3.1-pro")
+_MODEL = None
+def get_gemini_model():
+    global _MODEL
+    if _MODEL is None:
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        _MODEL = genai.GenerativeModel("gemini-3.1-pro")
+    return _MODEL
+
+
 
 CAPTIONS_PATH      = config.DATA_DIR / "captions.parquet"
 SHOT_SUMMARIES_PATH = config.DATA_DIR / "shot_summaries.parquet"
@@ -40,7 +47,7 @@ def _summarize_shot(shot_captions: list[str], memory_context: str, local_vlm=Non
         if local_vlm:
             raw = local_vlm._text_only_generate(prompt, max_new_tokens=256).strip()
         else:
-            response = MODEL.generate_content(prompt)
+            response = get_gemini_model().generate_content(prompt)
             raw = response.text.strip()
         
         import json, re

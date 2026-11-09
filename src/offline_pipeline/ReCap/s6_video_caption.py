@@ -7,14 +7,21 @@ import os, sys, time
 from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 load_dotenv()
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
 from src import config
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = genai.GenerativeModel("gemini-3.1-pro")
+_MODEL = None
+def get_gemini_model():
+    global _MODEL
+    if _MODEL is None:
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        _MODEL = genai.GenerativeModel("gemini-3.1-pro")
+    return _MODEL
+
+
 
 SHOT_SUMMARIES_PATH  = config.DATA_DIR / "shot_summaries.parquet"
 VIDEO_SUMMARIES_PATH = config.DATA_DIR / "video_summaries.parquet"
@@ -33,7 +40,7 @@ def _summarize_video(shot_summaries: list[str], local_vlm=None) -> str:
         if local_vlm:
             return local_vlm._text_only_generate(prompt, max_new_tokens=256).strip()
         else:
-            response = MODEL.generate_content(prompt)
+            response = get_gemini_model().generate_content(prompt)
             return response.text.strip()
     except Exception as e:
         print(f"  [Stage6 ERROR] {e}")

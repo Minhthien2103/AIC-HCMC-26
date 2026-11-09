@@ -1,9 +1,6 @@
 """
-init_db.py — Initialize Milvus and ElasticSearch schemas.
-Run once before ingesting any data.
-
-Usage:
-    python src/database/init_db.py
+init_db.py — Initialize Zilliz Cloud (Milvus) specifically for the ReCap pipeline.
+For Supabase (PostgreSQL), run the generated 'supabase_schema.sql' in the Supabase SQL Editor.
 """
 import os
 import sys
@@ -12,25 +9,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+from src import config
 
-# ── Config ────────────────────────────────────────────────────────────
-MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
-ES_URL     = os.getenv("ES_URL",     "http://localhost:9200")
+ZILLIZ_URI   = os.getenv("ZILLIZ_URI_RECAP",   getattr(config, "ZILLIZ_URI_RECAP", ""))
+ZILLIZ_TOKEN = os.getenv("ZILLIZ_TOKEN_RECAP", getattr(config, "ZILLIZ_TOKEN_RECAP", ""))
 
-# Mobile CLIP text encoder output dimension
 CLIP_DIM = 512
-
 MILVUS_COLLECTION = "aic_captions"
-ES_INDEX          = "aic_captions"
 
-# ── Milvus ────────────────────────────────────────────────────────────
-def init_milvus():
+
+def init_zilliz():
     from pymilvus import MilvusClient, DataType
-    print(f"[Milvus] Connecting to {MILVUS_URI} ...")
-    client = MilvusClient(uri=MILVUS_URI)
+    
+    if not ZILLIZ_URI or "your-zilliz" in ZILLIZ_URI:
+        print("[Zilliz] Please set ZILLIZ_URI and ZILLIZ_TOKEN in config.py or .env")
+        return
+
+    print(f"[Zilliz] Connecting to {ZILLIZ_URI} ...")
+    client = MilvusClient(uri=ZILLIZ_URI, token=ZILLIZ_TOKEN)
 
     if client.has_collection(MILVUS_COLLECTION):
-        print(f"[Milvus] Collection '{MILVUS_COLLECTION}' already exists. Skipping.")
+        print(f"[Zilliz] Collection '{MILVUS_COLLECTION}' already exists. Skipping.")
         return
 
     schema = client.create_schema(auto_id=True, enable_dynamic_field=False)
@@ -41,12 +40,12 @@ def init_milvus():
     schema.add_field("caption",       DataType.VARCHAR,      max_length=2048)
     schema.add_field("vector",        DataType.FLOAT_VECTOR, dim=CLIP_DIM)
 
+    # Zilliz supports AUTOINDEX which automatically optimizes the index for cloud
     index_params = client.prepare_index_params()
     index_params.add_index(
         field_name="vector",
-        index_type="IVF_FLAT",
-        metric_type="IP",
-        params={"nlist": 1024},
+        index_type="AUTOINDEX",
+        metric_type="IP"
     )
 
     client.create_collection(
@@ -54,44 +53,46 @@ def init_milvus():
         schema=schema,
         index_params=index_params,
     )
-    print(f"[Milvus] Collection '{MILVUS_COLLECTION}' created (dim={CLIP_DIM}).")
+    print(f"[Zilliz] Collection '{MILVUS_COLLECTION}' created successfully!")
 
 
-# ── ElasticSearch ─────────────────────────────────────────────────────
-def init_elasticsearch():
-    from elasticsearch import Elasticsearch
-    print(f"[ES] Connecting to {ES_URL} ...")
-    es = Elasticsearch(ES_URL)
+def generate_supabase_sql():
+    sql = """-- Run this exactly as is in the Supabase SQL Editor (https://supabase.com/dashboard)
+CREATE TABLE aic_captions (
+    id SERIAL PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    keyframe_name TEXT NOT NULL,
+    shot_id INTEGER,
+    caption TEXT,
+    shot_summary TEXT,
+    video_summary TEXT,
+    transcript TEXT,
+    objects TEXT,
+    -- This is the Postgres Full-Text Search tsvector column
+    fts tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', 
+            coalesce(caption, '') || ' ' || 
+            coalesce(shot_summary, '') || ' ' || 
+            coalesce(video_summary, '') || ' ' || 
+            coalesce(transcript, '') || ' ' || 
+            coalesce(objects, '')
+        )
+    ) STORED
+);
 
-    if es.indices.exists(index=ES_INDEX):
-        print(f"[ES] Index '{ES_INDEX}' already exists. Skipping.")
-        return
+-- Create a fast GIN index for lightning-fast text search
+CREATE INDEX aic_captions_fts_idx ON aic_captions USING GIN (fts);
 
-    mapping = {
-        "mappings": {
-            "properties": {
-                "video_id":      {"type": "keyword"},
-                "keyframe_name": {"type": "keyword"},
-                "shot_id":       {"type": "integer"},
-                "caption":       {"type": "text", "analyzer": "english"},
-                "transcript":    {"type": "text", "analyzer": "english"},
-                "objects":       {"type": "text", "analyzer": "english"},
-                "shot_summary":  {"type": "text", "analyzer": "english"},
-                "video_summary": {"type": "text", "analyzer": "english"},
-            }
-        },
-        "settings": {
-            "number_of_shards": 1,
-            "number_of_replicas": 0,
-        }
-    }
-
-    es.indices.create(index=ES_INDEX, body=mapping)
-    print(f"[ES] Index '{ES_INDEX}' created.")
+-- Create standard indexes for filtering
+CREATE INDEX aic_captions_video_id_idx ON aic_captions (video_id);
+"""
+    sql_path = Path(__file__).resolve().parent / "supabase_schema.sql"
+    with open(sql_path, "w") as f:
+        f.write(sql)
+    print(f"\n[Supabase] Generated SQL schema at: {sql_path}")
+    print("           Please paste the contents of that file into the Supabase SQL Editor.")
 
 
-# ── Main ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    init_milvus()
-    init_elasticsearch()
-    print("\nAll databases initialized successfully!")
+    init_zilliz()
+    generate_supabase_sql()

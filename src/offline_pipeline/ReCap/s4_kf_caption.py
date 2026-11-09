@@ -10,14 +10,21 @@ from pathlib import Path
 import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 load_dotenv()
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
 from src import config
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = genai.GenerativeModel("gemini-3.1-pro") # User requested Gemini 3.1 Pro
+_MODEL = None
+def get_gemini_model():
+    global _MODEL
+    if _MODEL is None:
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        _MODEL = genai.GenerativeModel("gemini-3.1-pro")
+    return _MODEL
+
+
 
 CAPTIONS_PATH = config.DATA_DIR / "captions.parquet"
 TRANSCRIPTS_PATH = config.DATA_DIR / "transcripts.parquet"
@@ -26,18 +33,34 @@ CONTEXT_K = 2  # Surrounding frames to include as context
 
 def _load_transcripts() -> dict[str, list[dict]]:
     """Load transcripts indexed by video_id -> list of {start, end, text}."""
-    if not TRANSCRIPTS_PATH.exists():
+    path = getattr(config, "SUBTITLES_JSON_PATH", config.DATA_DIR / "extracted_subtitles" / "all_subtitles.json")
+    if not path.exists():
         return {}
-    df = pd.read_parquet(TRANSCRIPTS_PATH)
-    result = {}
-    for row in df.itertuples():
-        vid = row.video_id
-        result.setdefault(vid, []).append({
-            "start": float(row.start_time),
-            "end":   float(row.end_time),
-            "text":  str(row.text),
-        })
-    return result
+        
+    try:
+        import json
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        result = {}
+        for item in data:
+            vid = item.get("video_id")
+            if not vid: continue
+            
+            # Filter out non-spoken closed captions (e.g. "[music playing]")
+            text = str(item.get("subtitles", "")).strip()
+            if text.startswith("[") and text.endswith("]"):
+                continue
+            
+            result.setdefault(vid, []).append({
+                "start": float(item.get("timestamp_start", 0)),
+                "end":   float(item.get("timestamp_end", 0)),
+                "text":  text,
+            })
+        return result
+    except Exception as e:
+        print(f"[Stage4] Failed to load subtitles: {e}")
+        return {}
 
 
 def _get_transcript_for_time(transcripts: list[dict], pts: float, window: float = 5.0) -> str:
@@ -80,12 +103,52 @@ def _caption_keyframe(
                 img_rgb = img.convert("RGB")
             return local_vlm._generate_text(local_vlm._prepare(messages, img_rgb), max_new_tokens=128)
         else:
-            response = MODEL.generate_content(parts)
+            response = get_gemini_model().generate_content(parts)
             return response.text.strip()
     except Exception as e:
         print(f"  [Caption ERROR] {e}")
         return ""
 
+
+
+def _detect_shots(video_id: str, df_map: pd.DataFrame) -> dict[int, int]:
+    """
+    Detects shots using jpeg_size.npy if available.
+    Returns a dict mapping frame_idx -> shot_id.
+    """
+    shot_map = {}
+    default_shot = 0
+    
+    jpeg_dir = getattr(config, "JPEG_SIZE_DIR", config.DATA_DIR / "jpeg_sizes")
+    npy_path = jpeg_dir / f"{video_id}.npy"
+    
+    if not npy_path.exists():
+        return {int(row["frame_idx"]): default_shot for _, row in df_map.iterrows()}
+        
+    try:
+        import numpy as np
+        sizes = np.load(npy_path)
+        
+        if len(sizes) > 1:
+            diffs = np.abs(np.diff(sizes))
+            threshold = max(np.median(diffs) * 3, 50000) 
+            
+            shot_id = 0
+            shot_map[int(df_map.iloc[0]["frame_idx"])] = shot_id
+            
+            for i in range(1, len(sizes)):
+                if i - 1 < len(diffs) and diffs[i-1] > threshold:
+                    shot_id += 1
+                if i < len(df_map):
+                    shot_map[int(df_map.iloc[i]["frame_idx"])] = shot_id
+        else:
+            if len(df_map) > 0:
+                shot_map[int(df_map.iloc[0]["frame_idx"])] = 0
+                
+        return shot_map
+    except Exception as e:
+        print(f"[Stage4] Error computing shots for {video_id}: {e}")
+        return {int(row["frame_idx"]): default_shot for _, row in df_map.iterrows()}
 
 def run_stage4(video_ids: list[str] | None = None, resume: bool = True, use_local: bool = False):
     if use_local:
@@ -115,8 +178,10 @@ def run_stage4(video_ids: list[str] | None = None, resume: bool = True, use_loca
             continue
 
         df_map = pd.read_csv(map_path)
-        keyframes = sorted(config.KEYFRAMES_DIR / vid, key=lambda p: p.name)
+        keyframes = sorted((config.KEYFRAMES_DIR / vid).glob("*.jpg"), key=lambda p: p.name)
+        
         transcripts = all_transcripts.get(vid, [])
+        shot_map = _detect_shots(vid, df_map)
 
         for i, kf_path in enumerate(keyframes):
             kf_name = kf_path.stem  # e.g. "001"
@@ -126,7 +191,9 @@ def run_stage4(video_ids: list[str] | None = None, resume: bool = True, use_loca
             # Get frame metadata
             idx = i
             pts = float(df_map.iloc[i]["pts_time"]) if i < len(df_map) else 0.0
-            shot_id = 0  # Will be filled by shot detection if available
+            frame_idx = int(df_map.iloc[i]["frame_idx"]) if i < len(df_map) else 0
+            shot_id = shot_map.get(frame_idx, 0)
+
 
             # Surrounding context frames
             prev_imgs = [keyframes[j] for j in range(max(0, i - CONTEXT_K), i)]
