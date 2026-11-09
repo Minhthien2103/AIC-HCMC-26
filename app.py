@@ -27,7 +27,8 @@ st.title("AI Challenge HCMC 2026 - Retrieval System")
 
 
 def resolve_keyframe_path(result: dict) -> str:
-    return str(config.keyframe_path(result["video_id"], result["keyframe_name"]))
+    name = result.get("keyframe_name") or f"{result.get('frame_id', '')}"
+    return str(config.keyframe_path(result.get("video_id", ""), name))
 
 
 def rows_to_csv(rows: list[list[object]]) -> str:
