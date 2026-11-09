@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +42,6 @@ from src import config
 from src.online_pipeline.object_filter import ObjectFilter
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.retrieval import RetrievalEngine
-from src.tasks.gemini_api import GeminiPipeline
 from src.submission.formatting import format_kis_row, format_qa_row, format_trake_row
 from src.submission.io import write_csv
 from src.submission.query_parser import load_query_specs
@@ -72,6 +72,15 @@ def parse_args() -> argparse.Namespace:
                    help=f"Max CSV rows per query (default: {DEFAULT_MAX_ROWS})")
     p.add_argument("--device",        default=DEFAULT_DEVICE, choices=("cuda", "cpu"),
                    help=f"Device for CLIP/VLM (default: {DEFAULT_DEVICE})")
+    p.add_argument("--retrieval-backend", choices=("zilliz", "faiss"),
+                   default=config.RETRIEVAL_BACKEND)
+    p.add_argument("--metadata-path", type=Path,
+                   help="Canonical metadata.parquet (or AIC_METADATA_PATH)")
+    p.add_argument("--keyframes-dir", type=Path,
+                   help="Extracted keyframe root (or AIC_KEYFRAMES_DIR)")
+    p.add_argument("--zilliz-visual-collection", default=config.ZILLIZ_VISUAL_COLLECTION)
+    p.add_argument("--zilliz-text-collection", default=config.ZILLIZ_TEXT_COLLECTION)
+    p.add_argument("--zilliz-object-collection", default=config.ZILLIZ_OBJECT_COLLECTION)
     p.add_argument("--no-vlm",        action="store_true",
                    help="Disable VLM - faster but VQA answers will be empty")
     p.add_argument("--external-search", action="store_true",
@@ -83,17 +92,60 @@ def parse_args() -> argparse.Namespace:
 
 def build_pipeline(args: argparse.Namespace):
     """Load models once and return (kis, vqa, trake) task objects."""
-    LOGGER.info("Loading FAISS index and metadata...")
-    encoder   = QueryEncoder(config.CLIP_MODEL_NAME, config.CLIP_PRETRAINED, device=args.device)
-    retriever = RetrievalEngine(config.FAISS_INDEX_PATH, config.METADATA_PATH)
-    if retriever.index is None or retriever.meta_df is None:
-        raise RuntimeError("FAISS index not found - run main_ingest.py first.")
+    if args.metadata_path is not None:
+        config.METADATA_PATH = args.metadata_path.expanduser().resolve()
+    elif os.getenv("AIC_METADATA_PATH"):
+        config.METADATA_PATH = Path(os.environ["AIC_METADATA_PATH"]).expanduser()
+    if args.keyframes_dir is not None:
+        config.KEYFRAMES_DIR = args.keyframes_dir.expanduser().resolve()
+    elif os.getenv("AIC_KEYFRAMES_DIR"):
+        config.KEYFRAMES_DIR = Path(os.environ["AIC_KEYFRAMES_DIR"]).expanduser()
 
-    object_filter = ObjectFilter(config.OBJECTS_PATH)
+    if args.retrieval_backend == "zilliz":
+        from src.online_pipeline.zilliz_object_filter import ZillizObjectFilter
+        from src.online_pipeline.zilliz_retrieval import ZillizRetrievalEngine
+
+        LOGGER.info("Loading MobileCLIP Zilliz visual/text collections and canonical metadata...")
+        encoder = QueryEncoder(
+            config.ZILLIZ_CLIP_MODEL_NAME,
+            config.ZILLIZ_CLIP_PRETRAINED,
+            device=args.device,
+        )
+        retriever = ZillizRetrievalEngine(
+            uri=os.getenv("ZILLIZ_URI", config.ZILLIZ_URI),
+            token=os.getenv("ZILLIZ_TOKEN", config.ZILLIZ_TOKEN),
+            metadata_path=config.METADATA_PATH,
+            visual_collection=args.zilliz_visual_collection,
+            text_collection=args.zilliz_text_collection,
+            vector_field=config.ZILLIZ_VECTOR_FIELD,
+            visual_pk_field=config.ZILLIZ_VISUAL_PK_FIELD,
+            text_pk_field=config.ZILLIZ_TEXT_PK_FIELD,
+            metric_type=config.ZILLIZ_METRIC_TYPE,
+            dimension=config.ZILLIZ_CLIP_DIM,
+        )
+        object_filter = ZillizObjectFilter(
+            retriever.client,
+            args.zilliz_object_collection,
+            retriever.meta_df,
+            pk_field=config.ZILLIZ_OBJECT_PK_FIELD,
+        )
+    else:
+        LOGGER.info("Loading legacy FAISS index and metadata...")
+        encoder = QueryEncoder(config.CLIP_MODEL_NAME, config.CLIP_PRETRAINED, device=args.device)
+        retriever = RetrievalEngine(config.FAISS_INDEX_PATH, config.METADATA_PATH)
+        if retriever.index is None or retriever.meta_df is None:
+            raise RuntimeError("FAISS index not found - run main_ingest.py first.")
+        object_filter = ObjectFilter(config.OBJECTS_PATH)
 
     vlm = None
     if ENABLE_VLM and not args.no_vlm:
         LOGGER.info("Initializing Gemini API Pipeline...")
+        try:
+            from src.tasks.gemini_api import GeminiPipeline
+        except ImportError as exc:
+            raise RuntimeError(
+                "run_queries.py Gemini mode needs google-generativeai; use --no-vlm or install that optional package"
+            ) from exc
         vlm = GeminiPipeline()
 
     semantic_filter = None

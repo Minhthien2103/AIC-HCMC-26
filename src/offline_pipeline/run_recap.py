@@ -15,8 +15,20 @@ Usage:
     python scripts/run_recap.py --no-resume
 """
 import sys, argparse
+from importlib import import_module
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+
+
+def _stage_runner(stage: int):
+    """Load a ReCap stage."""
+    module_names = {
+        4: "src.offline_pipeline.ReCap.s4_kf_caption",
+        5: "src.offline_pipeline.ReCap.s5_shot_caption",
+        6: "src.offline_pipeline.ReCap.s6_video_caption",
+        7: "src.offline_pipeline.ReCap.s7_embed",
+    }
+    return import_module(module_names[stage])
 
 def main():
     parser = argparse.ArgumentParser(description="Run the ReCap offline pipeline.")
@@ -43,23 +55,19 @@ def main():
 
     if 4 in stages:
         print("\n── Stage 4: Keyframe Captioning ──")
-        from src.offline_pipeline.ReCap.s4_kf_caption import run_stage4
-        run_stage4(video_ids=args.videos, resume=resume, use_local=use_local)
+        _stage_runner(4).run_stage4(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 5 in stages:
         print("\n── Stage 5: Shot-Level Temporal Memory ──")
-        from src.offline_pipeline.ReCap.s5_shot_caption import run_stage5
-        run_stage5(video_ids=args.videos, resume=resume, use_local=use_local)
+        _stage_runner(5).run_stage5(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 6 in stages:
         print("\n── Stage 6: Video-Level Summary ──")
-        from src.offline_pipeline.ReCap.s6_video_caption import run_stage6
-        run_stage6(video_ids=args.videos, resume=resume, use_local=use_local)
+        _stage_runner(6).run_stage6(video_ids=args.videos, resume=resume, use_local=use_local)
 
     if 7 in stages:
-        print("\n── Stage 7: Embed + Ingest to Milvus & ElasticSearch ──")
-        from src.offline_pipeline.ReCap.s7_embed import run_stage7
-        run_stage7()
+        print("\n── Stage 7: Embed + Ingest to Milvus & Supabase ──")
+        _stage_runner(7).run_stage7()
 
     print("\n✓ ReCap pipeline complete.")
 

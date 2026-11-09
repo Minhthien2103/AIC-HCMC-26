@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import polars as pl
+
+from src.online_pipeline.frame_neighborhood import FrameNeighborhood
 from src.tasks.kis_t import KIStask
 
 
@@ -75,6 +78,18 @@ class _Qwen:
         return 3 if image_path.endswith("007.jpg") else 1
 
 
+class _MediaRetriever:
+    def search(self, query: str, top_k: int):
+        del query, top_k
+        return [{"video_id": "V0", "metadata_score": 0.99, "metadata_text": "matching video"}]
+
+
+class _RejectingQwen:
+    def score_kis_match(self, image_path: str, original_query: str, must_have: list[str]):
+        del image_path, original_query, must_have
+        return 0
+
+
 def test_long_query_variants_keep_tail_and_fit_context():
     task = KIStask(_Encoder(), _Retriever())
     query = "one two three four five six seven. eight nine FINAL_TARGET_TOKEN ten eleven twelve."
@@ -109,15 +124,19 @@ def test_kis_does_not_trigger_temporal_and_keeps_baseline(monkeypatch):
     assert sum(result["video_id"] == "V0" for result in results) == 8
 
 
-def test_qwen_promotes_visual_match_and_preserves_clip_fallback(monkeypatch):
+def test_qwen_is_an_equal_evidence_source_not_a_hard_promotion(monkeypatch):
     qwen = _Qwen()
     task = KIStask(_Encoder(), _Retriever(), vlm_pipeline=qwen, enable_qwen=True, vlm_top_k=4)
     monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
 
     results = task.execute("ordinary query", top_k=5)
 
-    assert results[0]["faiss_idx"] == 7
-    assert {candidate["faiss_idx"] for candidate in results[1:]} >= {0, 1}
+    # Qwen's own ranking is only an equal RRF source; it cannot promote a
+    # candidate solely because a threshold was crossed.
+    assert results[0]["faiss_idx"] == 0
+    # The Qwen pool is stratified by video; it does not receive an implicit
+    # right to inspect every candidate or hard-promote a score threshold.
+    assert results[0]["faiss_idx"] != 7
     assert len(qwen.calls) == 4
 
 
@@ -133,4 +152,51 @@ def test_qwen_analysis_failure_falls_back_to_clip(monkeypatch):
 
     results = task.execute("ordinary query", top_k=5)
 
-    assert [candidate["faiss_idx"] for candidate in results] == [0, 1, 2, 3, 4]
+    # With no Qwen analysis, frame order follows video-first D'Hondt coverage
+    # rather than the old all-frame global ranking.
+    assert [candidate["faiss_idx"] for candidate in results] == [0, 3, 6, 9, 1]
+
+
+def test_qwen_rejections_are_not_rank_fusion_evidence():
+    ranked = KIStask._qwen_ranked(_Retriever._rows()[:3], "query", [], _RejectingQwen())
+
+    assert ranked == []
+
+
+def test_media_video_candidates_never_enter_frame_neighborhood(monkeypatch):
+    metadata = pl.DataFrame({
+        "video_id": ["V0"] * 12,
+        "faiss_idx": list(range(12)),
+        "frame_id": list(range(12)),
+    })
+    task = KIStask(
+        _Encoder(),
+        _SingleVideoRetriever(),
+        media_retriever=_MediaRetriever(),
+        frame_neighborhood=FrameNeighborhood(metadata),
+    )
+    monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
+
+    results = task.execute("ordinary query", top_k=5)
+
+    assert len(results) == 5
+    assert all(candidate.get("frame_id") is not None for candidate in results)
+    assert all(candidate.get("keyframe_name") for candidate in results)
+
+
+def test_simple_baseline_concentrates_top_five_on_strongest_videos(monkeypatch):
+    task = KIStask(
+        _Encoder(),
+        _Retriever(),
+        baseline_simple=True,
+        video_budget=4,
+        local_frame_budget=3,
+    )
+    monkeypatch.setattr("src.tasks.kis_t.translate_vi_to_en", lambda value: value)
+
+    results = task.execute("ordinary query", top_k=8)
+
+    assert len(results) == 8
+    assert results[0]["video_id"] == "V0"
+    assert sum(item["video_id"] == "V0" for item in results[:5]) == 3
+    assert len({item["video_id"] for item in results[:5]}) == 3

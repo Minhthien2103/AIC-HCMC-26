@@ -81,11 +81,16 @@ class QueryEncoder():
 
 
     def encode_image(self, image_input) -> np.ndarray:
+        return self.encode_image_batch([image_input])[0]
+
+
+    def encode_image_batch(self, image_inputs: Sequence) -> np.ndarray:
+        """Encode a batch of RGB PIL images for resumable offline indexing."""
         self._require_model()
-
-        img_tensor = self.preprocess(image_input).unsqueeze(0).to(self.device)
-
+        if not image_inputs:
+            return np.empty((0, 0), dtype=np.float32)
+        img_tensor = torch.stack([self.preprocess(image) for image in image_inputs]).to(self.device)
         with torch.inference_mode():
             features = self.model.encode_image(img_tensor).float()
             features = torch.nn.functional.normalize(features, p=2, dim=1)
-        return features.cpu().numpy().astype(np.float32, copy=False)[0]
+        return features.cpu().numpy().astype(np.float32, copy=False)
