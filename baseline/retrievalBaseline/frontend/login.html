@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enter Session</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .login-container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            min-width: 320px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+        input {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            margin-top: 1rem;
+            padding: 0.6rem;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .dev-btn {
+            background-color: #6c757d;
+            margin-top: 0.5rem;
+        }
+        .dev-btn:hover {
+            background-color: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Enter Session</h1>
+        <form id="login-form">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="password" id="password" placeholder="Password" required>
+            <button type="submit" id="login-button">Login to DRES</button>
+            <button type="button" id="dev-button" class="dev-btn">Dev Mode (Skip Login)</button>
+        </form>
+    </div>
+
+    <script src="src/scripts/config.js"></script>
+    <script>
+        document.getElementById('dev-button').addEventListener('click', function() {
+            localStorage.setItem('userName', 'DevUser');
+            localStorage.setItem('contestSessionID', 'dev_session_id');
+            localStorage.setItem('evaluationID', 'dev_evaluation_id');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const dresBase = (window.CONFIG && window.CONFIG.DRES_BASE) || window.DRES_BASE || "https://eventretrieval.one";
+
+            try {
+                const loginURL = `${dresBase}/api/v2/login`;
+                const loginResponse = await fetch(loginURL, {
+                    method: "POST",
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        'username': username,
+                        'password': password
+                    })
+                });
+
+                if (!loginResponse.ok) {
+                    throw new Error(`Login failed with status: ${loginResponse.status}`);
+                }
+
+                const loginData = await loginResponse.json();
+                const contestSessionID = loginData.sessionId;
+
+                localStorage.setItem('userName', username);
+                localStorage.setItem('contestSessionID', contestSessionID);
+
+                const evaluationURL = `${dresBase}/api/v2/client/evaluation/list?session=${contestSessionID}`;
+                const evaluationResponse = await fetch(evaluationURL, {
+                    method: "GET"
+                });
+
+                if (!evaluationResponse.ok) {
+                    throw new Error('Failed to fetch evaluation data');
+                }
+
+                const evaluationData = await evaluationResponse.json();
+                if (Array.isArray(evaluationData) && evaluationData.length > 0) {
+                    localStorage.setItem('evaluationID', evaluationData[0].id);
+                } else if (evaluationData.id) {
+                    localStorage.setItem('evaluationID', evaluationData.id);
+                } else {
+                    localStorage.setItem('evaluationID', 'default_eval');
+                }
+
+                window.location.href = 'index.html';
+            } catch (error) {
+                console.error('Error during login process:', error);
+                alert('Login failed: ' + error.message + '\nTip: Click "Dev Mode (Skip Login)" for offline development.');
+            }
+        });
+    </script>
+</body>
+</html>

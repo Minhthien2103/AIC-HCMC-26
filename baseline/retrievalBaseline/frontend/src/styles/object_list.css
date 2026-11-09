@@ -1,0 +1,77 @@
+.object-list-content {
+    display: none;
+    position: fixed;
+    top: 44px;
+    left: 3px;
+    background-color: white;
+    border: 1px solid #ccc;
+    padding: 20px 15px 20px 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    max-width: 220px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.object-list-content.show {
+    display: block;
+}
+.close-modal {
+    float: right;
+    font-size: 18px;
+    cursor: pointer;
+}
+.clear-all {
+    float: right;
+    cursor: pointer;
+    padding-right: 10px;
+}
+.object-list-content h2 {
+    margin-top: 0;
+    font-size: 15px;
+}
+.object-list-content ul {
+    list-style-type: none;
+    padding: 0;
+}
+.object-list-content li {
+    margin-bottom: 10px;
+}
+
+.search-container {
+    position: relative;
+    margin-bottom: 10px;
+}
+
+.object-list-content input[type="checkbox"] {
+    margin-right: 10px;
+}
+
+.object-list-content label {
+    flex-grow: 1;
+    font-size: 15px;
+}
+
+#search-bar {
+    width: -webkit-fill-available;
+    padding: 5px 30px 5px 35px;
+    border: 1px solid #ccc;
+    border-radius: 20px;
+    font-size: 14px;
+    outline: none;
+}
+
+.search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+}
+
+.search-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}

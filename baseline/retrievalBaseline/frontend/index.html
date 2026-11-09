@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trang web này chỉ để nói yêu em <3 <3 </title>
+    <!-- <link rel="preconnect" href="https://cdnjs.cloudflare.com"> -->
+    <!-- <link rel="preconnect" href="https://cdn.jsdelivr.net"> -->
+    <!-- <link rel="preconnect" href="https://vjs.zencdn.net"> -->
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <link rel="stylesheet" href="src/styles/layout.css" />
+    <link rel="stylesheet" href="src/styles/left_panel.css" />
+    <link rel="stylesheet" href="src/styles/right_panel.css" />
+    <link rel="stylesheet" href="src/styles/object_filter.css" />
+    <link rel="stylesheet" href="src/styles/show_video.css" />
+    <link rel="stylesheet" href="src/styles/video_frame.css" />
+    <link rel="stylesheet" href="src/styles/utils.css" />
+    <link rel="stylesheet" href="src/styles/queries_history.css" />
+    <link rel="stylesheet" href="src/styles/export_area.css" />
+    <link rel="stylesheet" href="src/styles/preview.css" />
+    <link rel="stylesheet" href="src/styles/object_list.css" />
+
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js" defer></script> -->
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.27.2/axios.min.js" defer></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" defer></script>
+    <script src="https://vjs.zencdn.net/7.17.0/video.min.js" defer></script>
+    <!-- <script src="src/critical.js" async></script> -->
+    <script>
+      // Function to clear local storage
+      function clearLocalStorage() {
+          localStorage.removeItem('evaluationID');
+          localStorage.removeItem('contestSessionID');
+          // Add any other items you want to remove here
+      }
+      
+      // Add event listener for beforeunload
+      window.addEventListener('beforeunload', function (e) {
+          clearLocalStorage();
+          
+          // The following is optional. It will show a dialog to confirm leaving the page.
+          // Most modern browsers no longer display custom messages here.
+          e.preventDefault(); // Cancel the event
+          e.returnValue = ''; // Chrome requires returnValue to be set
+      });
+      </script>
+</head>
+  <body>
+    <script>
+      // Check if the user has entered a name and session ID
+      if (!localStorage.getItem('evaluationID') || !localStorage.getItem('contestSessionID')) {
+        // If not, redirect to the login page
+        //window.location.href = 'login.html';
+      }
+    
+      // Function to use the stored name and session ID
+      function useSessionInfo() {
+        const evaluationID = localStorage.getItem('evaluationID') || 'None';
+        const contestSessionID = localStorage.getItem('contestSessionID') || 'None';
+        const userName = localStorage.getItem('userName') || 'Participant';
+        
+        console.log('[Session] User:', userName, 'Evaluation:', evaluationID, 'Session:', contestSessionID);
+        const userDisplay = document.getElementById('user-name-display');
+        if (userDisplay) {
+          userDisplay.textContent = userName;
+        }
+      }
+    
+        // And use the sessionId for your submissions:
+        // (Assuming you have a submit function that uses the session ID)
+        // submitFunction(sessionId);
+      }
+    
+      // Call this function when the page loads
+      window.onload = useSessionInfo;
+    
+      // Add a logout function
+      function logout() {
+        localStorage.removeItem('userName');
+        localStorage.removeItem('sessionId');
+        window.location.href = 'login.html';
+      }
+    </script>
+    <header class="header">
+
+      <div class="header-left">
+        
+        <div class="logo">
+          <img src="src/Img/icons8-heart-80.png" alt="Icon" id="shortcut-icon">
+        </div> 
+
+        <div class="object-list-button-container">
+          <button id="show-object-list" class="object-list-button">
+            <img src="src/Img/object_list.png" alt="Object List Icon">
+          </button>
+          <div class="selected-objects" id="selected-objects"></div>
+        </div>
+
+      </div>
+
+      <div class="dice-logo">
+        <img src="src/Img/icon-dice.png" id="dice-icon" alt="Dice Logo">
+      </div>
+
+      <div class="header-right">
+
+        
+        <button class="quick-search-button" id="quick-search">
+          <img src="src/Img/icon-lighting-grey.png" alt="icon">
+        </button>
+
+        <label class="mode-option">          
+          <input type="checkbox" id="mode-toggle" class="toggle-checkbox">
+          <span class="slider"></span>
+        </label>
+
+        <div class="button-header-group">
+          <button type="button" id="export-button">Export</button>
+          <button type="button" id="submit-button">Submit</button>
+        </div>
+
+    </div>
+    </header>
+
+
+
+    <div class="container">
+
+      <div class="left-panel">
+
+        <div class="model-option">
+          <button class="clip active">CLIP</button>
+          <button class="beit">BEIT</button>
+          <button class="blip">BLIP</button>
+          <button class="mix">MIX</button>
+        </div>
+
+        <div class="Box_Function">
+          <div class="search-card">
+
+            <form id="Search">
+
+              <div class="Search_Scene" id="search-scene-1">
+                <div class="tab-buttons">
+                  <button class="text-button active">
+                    <img src="src/Img/icon-outline-text.png" alt="icon">
+                  </button>
+                  <button class="image-button">
+                    <img src="src/Img/icon-image-plus.png" alt="icon">
+                  </button>
+                </div>
+                
+                <div class="mode-button">
+                  <button class="temporal-search active">Temporal</button>
+                  <button class="query-expansion">Expansion</button>
+                </div>
+
+                <div class="query-group">
+                  <div class="query-content-area">
+                    <textarea name="Text_Query" id="Text-Query-First" rows="4" placeholder="Enter the Query for First Scene"></textarea>
+                    
+                    <div class="image-drop-area" style="display: none;">
+                      <p class="drop-instruction">Drag and drop image here or click to upload</p>
+                      <input type="file" accept="image/*" style="display: none;" id="Image-Query-1">
+                      <div class="preview-upload-container"></div>
+                    </div>
+
+                  </div>
+
+                  <!--                   
+                  <div class="ocr-container">
+                    <textarea name="Ocr_Query" rows="2" placeholder="Search ocr"></textarea>
+                    <button class="close-ocr-button">×</button>
+                  </div>
+
+                  <div class="asm-container">
+                    <textarea name="Asm_Query" rows="2" placeholder="Search asm"></textarea>
+                    <button class="close-asm-button">×</button>
+                  </div>
+
+                  <div class="object-filter">
+                    <label>Object:</label>
+                    <input type="text" class="objectInput" list="suggestions">
+                    <input type="text" class="valueInput" data-type="text">
+                    <button class="close-filter-button">×</button>
+                  </div>
+                   -->
+
+                </div>
+              </div>
+                  
+              <div class="Search_Scene" id="search-scene-2">
+                <div class="tab-buttons">
+                  <button class="text-button active">
+                    <img src="src/Img/icon-outline-text.png" alt="icon">
+                  </button>
+                  <button class="image-button">
+                    <img src="src/Img/icon-image-plus.png" alt="icon">
+                  </button>
+                </div>
+
+                <div class="mode-button">
+                  <button class="temporal-search active">Temporal</button>
+                  <button class="query-expansion">Expansion</button>
+                </div>
+
+                <div class="query-group">
+                  <div class="query-content-area">
+                    <textarea name="Text_Query" id="Text-Query-Second" rows="4" placeholder="Enter the Query for Second Scene"></textarea>
+                    
+                    <div class="image-drop-area" style="display: none;">
+                      <p class="drop-instruction">Drag and drop image here or click to upload</p>
+                      <input type="file" accept="image/*" style="display: none;" id="Image-Query-1">
+                      <div class="preview-upload-container"></div>
+                    </div>
+
+                  </div>
+
+                  <!--                   
+                  <div class="ocr-container">
+                    <textarea name="Ocr_Query" rows="2" placeholder="Search ocr"></textarea>
+                    <button class="close-ocr-button">×</button>
+                  </div>
+
+                  <div class="asm-container">
+                    <textarea name="Asm_Query" rows="2" placeholder="Search asm"></textarea>
+                    <button class="close-asm-button">×</button>
+                  </div>
+
+                  <div class="object-filter">
+                    <label>Object:</label>
+                    <input type="text" class="objectInput" list="suggestions">
+                    <input type="text" class="valueInput" data-type="text">
+                    <button class="close-filter-button">×</button>
+                  </div>
+                   -->
+
+                  </div>
+              </div>
+
+            </form>
+          </div>
+              
+            <form class="object-detail">
+              <div id="input-container"></div>
+              <datalist id="suggestions">
+                <option value="person">person</option>
+                <option value="bicycle">bicycle</option>
+                <option value="car">car</option>
+                <option value="motorcycle">motorcycle</option>
+                <option value="airplane">airplane</option>
+                <option value="bus">bus</option>
+                <option value="train">train</option>
+                <option value="truck">truck</option>
+                <option value="boat">boat</option>
+                <option value="traffic light">traffic light</option>
+                <option value="fire hydrant">fire hydrant</option>
+                <option value="stop sign">stop sign</option>
+                <option value="parking meter">parking meter</option>
+                <option value="bench">bench</option>
+                <option value="bird">bird</option>
+                <option value="cat">cat</option>
+                <option value="dog">dog</option>
+                <option value="horse">horse</option>
+                <option value="sheep">sheep</option>
+                <option value="cow">cow</option>
+                <option value="elephant">elephant</option>
+                <option value="bear">bear</option>
+                <option value="zebra">zebra</option>
+                <option value="giraffe">giraffe</option>
+                <option value="backpack">backpack</option>
+                <option value="umbrella">umbrella</option>
+                <option value="handbag">handbag</option>
+                <option value="tie">tie</option>
+                <option value="suitcase">suitcase</option>
+                <option value="frisbee">frisbee</option>
+                <option value="skis">skis</option>
+                <option value="snowboard">snowboard</option>
+                <option value="sports ball">sports ball</option>
+                <option value="kite">kite</option>
+                <option value="baseball bat">baseball bat</option>
+                <option value="baseball glove">baseball glove</option>
+                <option value="skateboard">skateboard</option>
+                <option value="surfboard">surfboard</option>
+                <option value="tennis racket">tennis racket</option>
+                <option value="bottle">bottle</option>
+                <option value="wine glass">wine glass</option>
+                <option value="cup">cup</option>
+                <option value="fork">fork</option>
+                <option value="knife">knife</option>
+                <option value="spoon">spoon</option>
+                <option value="bowl">bowl</option>
+                <option value="banana">banana</option>
+                <option value="apple">apple</option>
+                <option value="sandwich">sandwich</option>
+                <option value="orange">orange</option>
+                <option value="broccoli">broccoli</option>
+                <option value="carrot">carrot</option>
+                <option value="hot dog">hot dog</option>
+                <option value="pizza">pizza</option>
+                <option value="donut">donut</option>
+                <option value="cake">cake</option>
+                <option value="chair">chair</option>
+                <option value="couch">couch</option>
+                <option value="potted plant">potted plant</option>
+                <option value="bed">bed</option>
+                <option value="dining table">dining table</option>
+                <option value="toilet">toilet</option>
+                <option value="tv">tv</option>
+                <option value="laptop">laptop</option>
+                <option value="mouse">mouse</option>
+                <option value="remote">remote</option>
+                <option value="keyboard">keyboard</option>
+                <option value="cell phone">cell phone</option>
+                <option value="microwave">microwave</option>
+                <option value="oven">oven</option>
+                <option value="toaster">toaster</option>
+                <option value="sink">sink</option>
+                <option value="refrigerator">refrigerator</option>
+                <option value="book">book</option>
+                <option value="clock">clock</option>
+                <option value="vase">vase</option>
+                <option value="scissors">scissors</option>
+                <option value="teddy bear">teddy bear</option>
+                <option value="hair drier">hair drier</option>
+                <option value="toothbrush">toothbrush</option>
+      
+              </datalist>
+            </form>
+        </div>
+
+        <div class="button-card">
+          <div class="button-group">
+            <button type="button" id="search-button">Search</button>
+            <button type="button" id="filter-button">Filter</button>
+          </div>
+          <label class="translate-option">
+            <input type="checkbox" id="translate-checkbox" class="toggle-checkbox">
+            <span class="slider"></span>
+          </label>
+
+        </div>
+        </div>
+        
+        <div class="right-panel">
+          <div class="content-wrapper">
+            <div id="preview-frame" class="preview-frame">
+
+              <!-- Left preview -->
+              <div class="preview-container left-preview">
+                <button class="close-preview-button">×</button>
+                <div class="preview-image-wrapper">
+                  <img id="preview-image" src="" alt="Preview Image" draggable="true">
+                  <div class="infor"></div>
+                  <div class="positionIndex"></div>
+                </div>
+              </div>
+
+              <!-- Right preview -->
+              <div class="preview-container right-preview">
+                <button class="close-preview-button">×</button>
+                <div class="current-preview-wrapper">
+                  <img id="current-preview" src="" alt="Current Preview" draggable="true">
+                  <div class="infor"></div>
+                </div>
+              </div>
+
+            </div>
+
+
+          
+          <div class="show-image-section">
+
+            <!-- Result frames by list -->
+            <div class="show-image-1">
+              <div class="right-column">
+                <div id="list-photo" class="list">
+                  <!-- Result content will be added here dynamically -->
+                </div>
+              </div>
+            </div>
+      
+            <!-- Result frames group by video -->
+            <div class="show-image-2" style="display: none;">
+              <div class="right-column">
+                <div id="images-rows" class="rows">
+                  <!-- Row slider content will be added here dynamically -->
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <!-- Queries history section -->
+        <div class="queries-icon-container" id="queries-icon">
+          <img src="src/Img/icon-history.png" class="queries-img">
+          <svg class="close-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18 6L6 18"/>
+            <path d="M6 6L18 18"/>
+          </svg>
+        </div>
+
+        <div class="queries-popup" id="queries-popup">
+          <div class="queries-header">Queries History</div>
+          <div class="queries-history" id="queries-history">
+              <button class="clear-button" id="clear-history">×</button>
+              <div class="query-container">
+                <!-- Queries will be added here dynamically -->
+            </div>
+          </div>
+
+          <div class="shared-queries" id="shared-queries">
+              <button class="clear-button" id="clear-shared">×</button>
+              <div class="query-container">
+                <!-- Queries will be added here dynamically -->
+            </div>
+          </div>
+          <div class="share-container">
+            <textarea id="share-input" rows="1" placeholder="Enter shared query"></textarea>
+              <button id="share-button">Share</button>
+          </div>
+        </div>
+        
+      </div>
+      
+
+        <!-- Show export area -->
+        <div id="export-area" class="export-area">
+          <div class="export-header">
+           
+            <div class="task-name">
+              <button class="task-button active" id="kis">
+                <img src="src/Img/icon-kis.png" alt="icon">
+              </button>
+              <button class="task-button" id="vqa">
+                <img src="src/Img/icon-vqa.png" alt="icon">
+              </button>
+            </div>
+            
+            <div class="export-buttons">
+              <button class="open-export-socket-button" id="open-export-socket">
+                <img src="src/Img/icon-door-open.png" alt="icon">
+              </button>
+              <button class="reset-export-button" id="reset-export">
+                <img src="src/Img/icon-delete-export.png" alt="icon">
+              </button>
+              <button class="open-export-button" id="open-export">
+                <img src="src/Img/icon-diagonal-arrow_right_up.png" alt="icon">
+              </button>
+            </div>
+            
+          </div>
+          <div id="export-images"></div>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- Show export list preview -->
+    <div id="export-fullscreen-overlay" class="fullscreen-overlay" style="display: none;">
+      <div class="fullscreen-content">
+        <div class="header">
+          <div class="task-buttons">
+            <button class="task-button active" id="kis-fullscreen">
+              <img src="src/Img/icon-kis.png" alt="icon">
+            </button>
+            <button class="task-button" id="vqa-fullscreen">
+              <img src="src/Img/icon-vqa.png" alt="icon">
+            </button>
+          </div>
+
+          <div class="control-buttons">
+            <button type="button" id="submit-fullscreen-button">Submit</button>
+            <button class="reset-export-button" id="reset-export-fullscreen">
+              <img src="src/Img/icon-reset.png" alt="icon">
+            </button>
+            <button class="open-export-button" id="close-export-fullscreen">
+              <img src="src/Img/icon-diagonal-arrow-right-down.png" alt="icon">
+            </button>
+          </div>
+        </div>
+        <div class="export-content" id="export-fullscreen-content">
+          <!-- Export items will be dynamically added here -->
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Show the export confirm card -->
+    <div id="exportModal">
+      <div class="export-modal-content">
+        <h2>Export CSV</h2>
+        <input type="text" id="filenameInput" placeholder="File name">
+        <div class="export-modal-buttons">
+            <button class="export-modal-btn confirm">Confirm</button>
+            <button class="export-modal-btn cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+
+
+    <!-- Show the previous and next frame of a frame in the video -->
+    <div class="video-frames" id="video-frames">
+    </div>
+
+
+    <!-- Show the loading indicator -->
+    </div>
+      <div id="loading-indicator" class="loading-indicator">
+        <div class="spinner"></div>
+        <div class="loading-text">Searching...</div>
+      </div>
+    </div>
+
+
+    <!-- Show video  -->
+    <div id="Details" class="Details">
+      <div class="details_bg" id="details_bg">
+        <div class="draggable-bar"></div>
+        <span class="close">×</span>
+        <video id="vid_details" class="vid_details" controls preload="auto" fluid="true">
+          <source src="" type="application/x-mpegURL"/>
+        </video>
+        <div class="custom-controls">
+          <button id="rewindBtn"><i class="fas fa-backward"></i></button>
+          <button id="initialTimeBtn"><i class="fas fa-redo"></i></button>
+          <button id="forwardBtn"><i class="fas fa-forward"></i></button>
+      </div>
+      </div>
+    </div>
+
+
+    <!-- Show the fullscreen of the image preview -->
+    <div id="fullscreen-image-container" style="display: none;">
+      <img id="fullscreen-image" src="" alt="Fullscreen Image">
+      <div id="fullscreen-navigation" style="display: none;">
+        <button id="prev-frame-button">←</button>
+        <button id="next-frame-button">→</button>
+      </div>
+      <div id="image-index" style="display: none;"></div>
+      <button id="close-fullscreen-button">×</button>
+    </div>
+
+
+    <!-- Show the table of short-cut and its function -->
+    <div id="shortcut-card" class="shortcut-card" style="display: none;">
+      <h3>Keyboard Shortcuts</h3>
+      <ul id="shortcut-list"></ul>
+    </div>
+
+
+    <!-- Show the object card  -->
+    <div class="object-list-content">
+      <span class="close-modal">×</span>
+      <span class="clear-all" title="Clear all selections">🗑️</span>
+      <h2>Unique Objects List</h2>
+
+      <div class="search-container">
+        <span class="search-icon">
+            <img src="src/Img/icon-search.png" alt="Search">
+        </span>
+        <input type="text" id="search-bar" placeholder="Search objects...">
+      </div>
+
+      <ul id="object-list">
+          <!-- <li><input type="checkbox" value="person" id="object-person"><label for="object-person">person (215 videos)</label></li>
+          <li><input type="checkbox" value="tie" id="object-tie"><label for="object-tie">tie (49 videos)</label></li>
+          <li><input type="checkbox" value="sports_ball" id="object-sports_ball"><label for="object-sports_ball">sports_ball (12 videos)</label></li>
+          <li><input type="checkbox" value="clock" id="object-clock"><label for="object-clock">clock (38 videos)</label></li>
+          <li><input type="checkbox" value="sandwich" id="object-sandwich"><label for="object-sandwich">sandwich (1 videos)</label></li> -->
+      </ul>
+    </div>
+
+    <script src="src/scripts/config.js"></script>
+    <script src="src/scripts/filter_get_infor.js"></script>
+    <script src="src/scripts/short_cut.js"></script>
+    <script src="src/scripts/preview.js"></script>
+    <script src="src/scripts/web_socket.js"></script>
+    <script src="src/websocket/multi_combined_search.js"></script>
+    <script src="src/scripts/start_ui.js"></script>
+    <script src="src/scripts/update_result.js"></script>
+    <script src="src/scripts/dice.js"></script>
+    <script src="src/scripts/show_video.js"></script>
+    <script src="src/scripts/show_videoframe.js"></script>
+    <script src="src/scripts/export.js"></script>
+    <script src="src/scripts/group_search.js"></script>
+    <script src="src/scripts/left_panel.js"></script>
+    <script src="src/scripts/queries_history.js"></script>
+    <script src="src/scripts/object_list.js"></script>
+    <script src="src/scripts/pagnition.js"></script>
+    <script src="src/scripts/submit_dres.js"></script>
+    <script src="src/scripts/query_backend.js"></script>
+  </body>
+</html>
+
+

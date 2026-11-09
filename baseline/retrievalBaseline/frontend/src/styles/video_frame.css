@@ -1,0 +1,134 @@
+
+.video-frames {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 16vh;
+    background-color: rgb(255, 255, 255);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.frames-container {
+    display: flex;
+    align-items: center;
+    overflow-x: auto;
+    padding: 5px 0;
+    background-color: white;
+}
+
+.frame-container {
+    display: inline-block;
+    margin: 0 5px;
+    text-align: center;
+}
+
+.video-frame {
+    width: 130px;  /* Adjust this value as needed */
+    height: auto;
+    border: 2px solid transparent;
+    box-shadow:2px 4px 3px rgba(0, 0, 0, 0.1);
+    transition: border-color 0.3s ease;
+}
+
+.current-frame {
+    border: 5px solid #ff0000;
+}
+
+.infor {
+    font-size: 11px;
+    color: #333;
+    margin-top: 5px;
+}
+
+/* cssCopy.frames-container {
+    display: flex;
+    align-items: center;
+    overflow-x: auto;
+    padding: 10px 0;
+    background-color: rgba(0, 0, 0, 0.8);
+} */
+
+/*--------------------------------------------------------------------------*/
+
+/* .nav-button {
+    background-color: var(--primary-color);;
+    border: none;
+    color: white;
+    padding: 10px 15px;
+    font-size: 16px;
+    cursor: pointer;
+    margin: 5px 5px 0 5px;
+}
+
+.nav-button:hover {
+    background-color: #3a7bd5;
+}
+
+.nav-button:first-of-type {
+    left: 10px;
+}
+
+.nav-button:last-of-type {
+    right: 10px;
+} */
+
+.navigation-buttons {
+    justify-content: center;
+    margin: 10px 5px 5px 5px;
+}
+
+.nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 5px;
+}
+
+.nav-button {
+    background-color: var(--primary-color);
+    border: none;
+    color: white;
+    padding: 10px 15px;
+    font-size: 16px;
+    cursor: pointer;
+    margin: 0 3px;
+    height: 32px;
+    width: 32px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+  
+  .nav-button:hover {
+    background-color: #2a5db2;
+  }
+
+
+/*--------------------------------------------------------------------------*/
+
+.close-button {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background-color: var(--primary-color);;
+    border: none;
+    color: white;
+    font-size: 24px;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    padding: 5px 10px;
+}
+  
+.close-button:hover {
+    background-color: #2a5db2;
+}

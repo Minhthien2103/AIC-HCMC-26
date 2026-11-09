@@ -1,0 +1,213 @@
+/*--------------------------------------------------------------------------*/
+/* list photo format */
+
+.show-image-1, .show-image-2 {
+  overflow-y: auto;
+  height: 100%; 
+  width: 100%;
+}
+
+.show-image-section {
+  display: flex;
+  height: 100%;
+}
+
+.right-column {
+    flex: 0 0 300px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.list {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.list .img-dis{
+    width: 14.2%;
+    /* height: 180px; */
+    position: relative;
+    display: inline-block;
+}
+
+.list .img-dis .result {
+    display: block;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    width: 98%;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    object-fit: cover;
+    aspect-ratio: 7 / 4;
+    margin-bottom: 3px;
+}
+
+.list .img-dis img:hover {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transform: scale(1.05);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+} 
+
+.list .img-dis .infor{
+    display: none;
+    position: absolute;
+    bottom: 5px;
+    left: 5px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 2px;
+    font-size: 12px;
+    border-radius: 3px;
+}
+
+.list .img-dis .similarity_search{
+    display: none;
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 0; 
+    height: 0; 
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    border-left: 20px solid rgb(2, 255, 23);
+    cursor: pointer;
+}
+
+.list .img-dis:hover .infor,
+.list .img-dis:hover .similarity_search{
+    display: flex;
+    align-items: center;
+}
+
+
+.list .img-dis .export_icon {
+  display: none;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.list .img-dis .export_icon:before {
+  content: '+';
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  color: #000;
+}
+
+.list .img-dis:hover .export_icon {
+  display: block;
+}
+
+
+/*--------------------------------------------------------------------------*/
+/* rows photo format */
+
+.rows .group-frame {
+  margin-bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.rows .group-frame h3 {
+  margin-top: 0px;
+  margin-bottom: 5px;
+  width: 100%;
+}
+
+.rows .img-dis {
+  flex: 0 0 auto;
+  position: relative;
+  width: 14.2%;
+}
+
+.rows .img-dis .result {
+  display: block;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
+  width: 98%;
+  aspect-ratio: 7 / 4;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  object-fit: cover;
+  /* border: 1px solid #ddd; */
+  border-radius: 5px;
+  margin-bottom: 3px;
+}
+
+.rows .img-dis .infor,
+.rows .img-dis .similarity_search {
+  display: none;
+  position: absolute;
+}
+
+.rows .img-dis:hover .infor,
+.rows .img-dis:hover .similarity_search {
+  display: flex;
+  align-items: center;
+}
+
+.rows .img-dis .infor {
+  bottom: 5px;
+  left: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  padding: 2px;
+  font-size: 12px;
+}
+
+.rows .img-dis .similarity_search {
+  bottom: 5px;
+  right: 5px;
+  width: 0;
+  height: 0;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-left: 20px solid rgb(2, 255, 23);
+  cursor: pointer;
+}
+
+.rows .img-dis .export_icon {
+  display: none;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.rows .img-dis .export_icon:before {
+  content: '+';
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  color: #000;
+}
+
+.rows .img-dis:hover .export_icon {
+  display: block;
+}
+
+.rows hr {
+  border: none;
+  height: 1px;
+  background-color: #333;
+  margin: 10px 0;
+  width: 100%
+}

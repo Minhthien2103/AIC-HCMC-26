@@ -1,0 +1,88 @@
+.Details{
+    display: none;
+    position: fixed;
+    z-index: 1;
+    right: 0;
+    top: 44px;
+    height: 490px;
+    width: 700px;
+    overflow: hidden;
+    justify-content: center;
+    align-items: center;
+}
+.Details .details_bg{
+    display: flex;
+    position: fixed;
+    overflow: auto;
+    background-color: aliceblue;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    height: 490px;
+    width: 700px;
+    justify-content: center;
+    align-items: center;
+    right: 0;
+}
+
+.Details .details_bg .vid_details{
+    margin: auto;
+    display: block;
+    width: 695px;
+}
+.Details .details_bg .close{
+    position: absolute;
+    top: 0;
+    right: 0px;
+    width: 5%;
+    height: 25px;
+    color: #ff0000;
+    font-size: 30px;
+    font-weight: bold;
+    transition: 0.3s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    background-color: #b1b3b4;
+    padding-bottom: 5px;
+    user-select: none;
+}
+.Details .details_bg .close:hover,
+.close:focus {
+    color: #ffffff;
+    text-decoration: none;
+    background-color: #ff0000;
+}
+
+.draggable-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 30px;
+    background-color: #b1b3b4;
+    cursor: move;
+}
+
+.Details .details_bg .custom-controls {
+    position: absolute;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+}
+
+.Details .details_bg .custom-controls button {
+    padding: 5px 10px;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.Details .details_bg .custom-controls button:hover {
+    background-color: rgba(0, 0, 0, 0.7);
+}

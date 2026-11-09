@@ -1,0 +1,279 @@
+
+.export-area {
+  width: 0;
+  height: 95vh;
+  overflow: hidden;
+  background-color: #f9f9f9;
+  border-left: 1px solid #ccc;
+  border: 2px dashed #ccc;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.export-area.show {
+  width: 18%;
+}
+
+
+.export-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 36px;
+  margin: 5px 5px;
+}
+
+.task-button img {
+  width: 24px;
+  height: 24px;
+}
+
+.task-button {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.task-button.active {
+  background-color: #2c3e50;
+}
+
+.task-button:hover {
+  background-color: #2e5a77;
+}
+
+.open-export-socket-button, .reset-export-button, .open-export-button {
+  background-color: #e74c3c;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.open-export-socket-button img, .reset-export-button img, .open-export-button img {
+  width: 18px;
+  height: 18px;
+}
+
+.open-export-socket-button:hover, .reset-export-button:hover, .open-export-button:hover {
+  background-color: #ec7063;
+}
+
+
+#export-images {
+  flex-grow: 1; 
+  overflow-y: auto; 
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.export-image {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.export-image-container {
+  position: relative;
+  width: 100%;
+  cursor: move;
+}
+
+.export-image-container.drag-over {
+  border: 2px dashed #000;
+}
+
+.export-image-container .infor {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  color: #333;
+  margin-top: 0;
+}
+
+.delete-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: rgba(255, 0, 0, 0.7);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+} 
+
+/*--------------------------------------------------------------------------*/
+
+
+.vqa-input {
+  width: calc(100% - 30px);
+  margin: 2px 15px 0;
+  font-size: 11px;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.vqa-input {
+  display: none;
+}
+
+.vqa-mode .vqa-input {
+  display: block;
+}
+
+.task-button.active {
+  background-color: #2c3e50;
+}
+
+
+
+
+
+/*--------------------------------------------------------------------------*/
+/* export full screen */
+
+.fullscreen-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  z-index: 99;
+  overflow-y: auto;
+}
+
+.fullscreen-content {
+  width: 95%;
+  max-width: 1800px;
+  margin: 20px auto;
+  background-color: #fff;
+  border-radius: 5px;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+#submit-fullscreen-button {
+  flex-grow: 1;
+  flex-basis: 0; 
+  background-color: #6F4E37;
+  font-weight: bold;
+  padding: 0.5rem 1rem;
+}
+
+#submit-fullscreen-button:hover {
+  background-color: #8B5A2B;
+}
+
+.control-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.export-content {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+
+.export-item {
+  background-color: #f9f9f9;
+  border-radius: 5px;
+  padding: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.export-item img {
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+}
+
+.export-item .info {
+  margin-top: 5px;
+  font-size: 13px;
+}
+
+
+.export-item .vqa-input {
+  margin: 5px 0 0 0;
+  width: 50%;
+  padding: 5px;
+  font-size: 12px;
+  display: block;
+}
+
+
+/*--------------------------------------------------------------------------*/
+/* export model */
+
+#exportModal {
+  display: none;
+  position: fixed;
+  z-index: 2;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  z-index: 100;
+}
+.export-modal-content {
+  background-color: #ffffff;
+  margin: 15% auto;
+  padding: 20px;
+  border-radius: 15px;
+  width: 300px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+#filenameInput {
+  width: -webkit-fill-available;
+  padding: 10px;
+  margin: 10px 0;
+  border: 2px solid #ddd;
+  border-radius: 5px;
+  background-color: #fff;
+  color: #333;
+}
+#filenameInput:focus {
+  outline: none;
+  box-shadow: 0 0 5px #4CAF50;
+}
+.export-modal-buttons {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 15px;
+}
+.export-modal-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.export-modal-btn.confirm {
+  background-color: #4CAF50;
+  color: white;
+}
+.export-modal-btn.cancel {
+  background-color: #f44336;
+  color: white;
+}

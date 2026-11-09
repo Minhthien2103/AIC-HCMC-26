@@ -1,0 +1,188 @@
+/*--------------------------------------------------------------------------*/
+/* textarea */
+
+
+textarea {
+    border-radius: 5px;
+    padding: 5px;
+    resize: none;
+    font-size: 13px;
+    border: 1px solid #e0e0e0;
+    transition: border-color 0.3s ease;
+}
+
+textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.textarea-wrapper::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(to right, #4a90e2, #67b26f);
+    border-radius: 0 0 12px 12px;
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+}
+
+textarea:focus + .textarea-wrapper::after {
+    transform: scaleX(1);
+}
+
+
+/*--------------------------------------------------------------------------*/
+/* button */
+
+button {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    text-align: center;
+    font-size: 13px;
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: normal;
+    transition: background-color 0.3s ease, transform 0.1s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    min-width: 0;
+    user-select: none;
+    
+    /* Disable text selection in button */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+
+}
+
+button:hover {
+    background-color: #2a5db2;
+    transform: translateY(-1px);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+
+/*--------------------------------------------------------------------------*/
+/* toggle checkbox */
+
+.mode-option {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.translate-option {
+    position: relative;
+    display: inline-block;
+    max-width: 60px;
+    height: 24px;
+}
+.toggle-checkbox {
+    display: none;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #e4d1be;
+    transition: .4s;
+    border-radius: 24px;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px; 
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+input:checked + .slider {
+    background-color: #8B5A2B;
+}
+input:checked + .slider:before {
+    transform: translateX(36px);
+}
+
+/*--------------------------------------------------------------------------*/
+/* loading indicator*/
+
+.loading-indicator {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    padding: 25px;
+    display: none;
+    align-items: center;
+    z-index: 1000;
+    min-width: 250px;
+}
+  
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #3a7bd5;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 20px;
+}
+  
+.loading-text {
+    font-size: 18px;
+    color: #333;
+    font-weight: 500;
+}
+  
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/*--------------------------------------------------------------------------*/
+
+/* Tùy chỉnh thanh cuộn cho các trình duyệt dựa trên WebKit */
+::-webkit-scrollbar {
+    width: 8px; /* Độ rộng của thanh cuộn */
+    height: 8px; /* Chiều cao của thanh cuộn ngang */
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1; /* Màu nền của track */
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888; /* Màu của thanh cuộn */
+    border-radius: 10px; /* Bo tròn các góc */
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555; /* Màu của thanh cuộn khi hover */
+}
+
+/* Tùy chỉnh thanh cuộn cho Firefox */
+* {
+    scrollbar-width: thin; /* Độ rộng của thanh cuộn */
+    scrollbar-color: #888 #f1f1f1; /* Màu của thanh cuộn và track */
+}

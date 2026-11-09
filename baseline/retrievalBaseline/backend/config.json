@@ -1,0 +1,25 @@
+{
+  "// Model Configuration": "Configure ML models and their paths",
+  "clip_model_name": "ViT-H-14-378-quickgelu",
+  "clip_pretrained": "dfn5b",
+  "device": "cuda",
+  
+  "// Database Configuration": "Configure Milvus vector database connection",
+  "milvus_host": "192.168.20.156",
+  "milvus_port": 19530,
+  "milvus_database": "default",
+  "collection_name": "AIC_2024_1",
+  "search_limit": 3000,
+  "replica_number": 1,
+  
+  "// Server Configuration": "Configure FastAPI server settings",
+  "cors_origins": "http://localhost:8007,https://localhost:8005,https://localhost:8443",
+  "max_workers": 4,
+  "log_level": "INFO",
+  "gzip_minimum_size": 1000,
+  
+  "// Performance Settings": "Optional performance tuning",
+  "cache_size": 1000,
+  "temporal_frame_threshold": 1500,
+  "default_result_limit": 1000
+}
