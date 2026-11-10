@@ -1,0 +1,666 @@
+/* ==============================================================================
+   DARK MODE THEME FOR AIC RETRIEVAL SYSTEM
+   ============================================================================== */
+
+:root {
+  --bg-app: #0b0f19;
+  --bg-header: #111827;
+  --bg-panel: #131c2e;
+  --bg-card: #182338;
+  --bg-card-hover: #1e2c47;
+  --bg-input: #0b1120;
+  
+  --border-subtle: #243049;
+  --border-strong: #334155;
+  --border-focus: #3b82f6;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-cyan: #38bdf8;
+
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-success: #059669;
+  --color-success-hover: #047857;
+  --color-indigo: #4f46e5;
+  --color-indigo-hover: #4338ca;
+  --color-amber: #d97706;
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+}
+
+/* --------------------------------------------------------------------------
+   Global Layout & Scrollbars
+   -------------------------------------------------------------------------- */
+body, html {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Header Navigation Bar
+   -------------------------------------------------------------------------- */
+.header {
+  background-color: var(--bg-header) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4) !important;
+  padding: 6px 16px !important;
+  height: 52px !important;
+  box-sizing: border-box !important;
+}
+
+.header-left, .header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Nav & Action Buttons */
+.nav-btn {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.nav-btn:hover {
+  background-color: var(--bg-card-hover);
+  border-color: var(--border-focus);
+  color: #ffffff;
+}
+
+.dice-btn {
+  background-color: #1e1b4b;
+  border-color: #4338ca;
+  color: #c7d2fe;
+}
+.dice-btn:hover {
+  background-color: #312e81;
+}
+
+/* Task Selector in Header */
+.task-selector-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #1e293b;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #3b82f6;
+}
+
+.task-selector-wrapper label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #93c5fd;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-dropdown {
+  background-color: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.task-dropdown:focus {
+  border-color: #60a5fa;
+}
+
+/* Mode View Toggle (Grid / Video rows) */
+.mode-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background-color: var(--bg-card);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.mode-option .slider {
+  background-color: #334155 !important;
+}
+.mode-option input:checked + .slider {
+  background-color: var(--color-primary) !important;
+}
+
+/* Header Submit & Export Action Buttons */
+.action-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.export-action-btn {
+  background-color: var(--color-indigo) !important;
+  color: #ffffff !important;
+}
+.export-action-btn:hover {
+  background-color: var(--color-indigo-hover) !important;
+}
+
+.submit-action-btn {
+  background-color: var(--color-success) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(5, 150, 105, 0.4);
+}
+.submit-action-btn:hover {
+  background-color: var(--color-success-hover) !important;
+  box-shadow: 0 0 15px rgba(5, 150, 105, 0.6);
+}
+
+/* --------------------------------------------------------------------------
+   Left Panel (Search & Query Builder)
+   -------------------------------------------------------------------------- */
+.left-panel {
+  background-color: var(--bg-panel) !important;
+  border-right: 1px solid var(--border-subtle) !important;
+  padding: 8px !important;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Model Options */
+.model-option {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  padding: 3px !important;
+  gap: 4px !important;
+}
+
+.model-option button {
+  background-color: transparent !important;
+  color: var(--text-secondary) !important;
+  border: 1px solid transparent !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.model-option button.active {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+}
+
+.model-option button:hover:not(.active) {
+  background-color: var(--bg-card-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Search Scenes - Outer Blue Box height reduced by over 50% */
+.Search_Scene {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 7px !important;
+  padding: 10px 10px !important;
+  margin-bottom: 6px !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Single-line Compact Header Bar (Title on left, Tabs on right) */
+.scene-header-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 5px !important;
+  padding: 0 !important;
+  min-height: 24px !important;
+}
+
+.scene-header-title {
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: #60a5fa !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.scene-header-controls {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.tab-buttons {
+  display: flex !important;
+  gap: 4px !important;
+  margin: 0 !important;
+}
+
+.tab-buttons button {
+  background-color: var(--bg-input) !important;
+  color: var(--text-secondary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 4px !important;
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  cursor: pointer !important;
+  height: 22px !important;
+  line-height: 22px !important;
+}
+
+.tab-buttons button.active {
+  background-color: #1e3a8a !important;
+  border-color: #3b82f6 !important;
+  color: #bfdbfe !important;
+}
+
+.query-group {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.query-content-area {
+  position: relative !important;
+  height: auto !important;
+  min-height: unset !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Query Textarea Input - Restored to comfortable full height */
+.Search_Scene textarea[name="Text_Query"],
+textarea[name="Text_Query"],
+.query-content-area textarea {
+  background-color: var(--bg-input) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  padding: 8px 10px !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  height: 80px !important;
+  min-height: 80px !important;
+  max-height: 160px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  resize: vertical !important;
+}
+
+.Search_Scene textarea[name="Text_Query"]:focus,
+textarea[name="Text_Query"]:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+  outline: none !important;
+}
+
+.image-drop-area {
+  background-color: var(--bg-input) !important;
+  border: 2px dashed var(--border-strong) !important;
+  border-radius: 6px !important;
+  color: var(--text-muted) !important;
+}
+
+/* Event Management for TRAKE */
+.scene-actions-bar {
+  display: flex !important;
+  gap: 8px !important;
+  margin-top: 8px !important;
+  margin-bottom: 8px !important;
+}
+
+.btn-add-scene {
+  flex: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  background: linear-gradient(135deg, #1e3a8a, #2563eb) !important;
+  color: #ffffff !important;
+  border: 1px solid #3b82f6 !important;
+  border-radius: 6px !important;
+  padding: 7px 12px !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-add-scene:hover {
+  background: linear-gradient(135deg, #2563eb, #3b82f6) !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-clear-scenes {
+  flex: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  background-color: #1e293b !important;
+  color: #94a3b8 !important;
+  border: 1px solid #334155 !important;
+  border-radius: 6px !important;
+  padding: 7px 10px !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-clear-scenes:hover {
+  background-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+.close-scene-btn {
+  background: transparent !important;
+  border: none !important;
+  color: #ef4444 !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  cursor: pointer !important;
+  padding: 0 4px !important;
+  line-height: 1 !important;
+  transition: transform 0.15s ease, color 0.15s ease !important;
+}
+
+.close-scene-btn:hover {
+  color: #f87171 !important;
+  transform: scale(1.25) !important;
+}
+
+/* Search Actions */
+.button-card {
+  background-color: transparent !important;
+  padding: 4px 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+.button-group {
+  display: flex !important;
+  gap: 8px !important;
+  margin-bottom: 0 !important;
+}
+
+.main-search-btn {
+  flex: 2 !important;
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 10px 14px !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
+  transition: all 0.2s ease !important;
+}
+.main-search-btn:hover {
+  background-color: var(--color-primary-hover) !important;
+}
+
+.main-filter-btn {
+  flex: 1 !important;
+  background-color: #334155 !important;
+  color: #f1f5f9 !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 10px 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+.main-filter-btn:hover {
+  background-color: #475569 !important;
+}
+  user-select: none;
+}
+
+/* --------------------------------------------------------------------------
+   Right Panel (Results Grid & Cards)
+   -------------------------------------------------------------------------- */
+.right-panel {
+  background-color: var(--bg-app) !important;
+}
+
+.show-image-section {
+  background-color: var(--bg-app) !important;
+}
+
+/* Result Cards */
+.list .img-dis, .rows .img-dis {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  position: relative !important;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.list .img-dis:hover, .rows .img-dis:hover {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* Info Bar on Keyframe */
+.list .img-dis .infor, .rows .img-dis .infor {
+  background: rgba(11, 17, 32, 0.9) !important;
+  color: var(--text-cyan) !important;
+  font-family: monospace !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 3px 6px !important;
+  border-radius: 4px !important;
+  bottom: 4px !important;
+  left: 4px !important;
+  position: absolute !important;
+  display: block !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+/* Action Badges on Keyframe */
+.similarity-search-badge {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background-color: rgba(30, 41, 59, 0.9);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.4);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+  z-index: 5;
+}
+
+.similarity-search-badge:hover {
+  background-color: #eab308;
+  color: #000000;
+  border-color: #eab308;
+}
+
+.pin-export-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background-color: rgba(30, 41, 59, 0.9);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+  z-index: 5;
+}
+
+.pin-export-badge:hover {
+  background-color: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+/* --------------------------------------------------------------------------
+   Export Area (Right Drawer)
+   -------------------------------------------------------------------------- */
+.export-area {
+  background-color: var(--bg-panel) !important;
+  border-left: 1px solid var(--border-subtle) !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+.export-header {
+  border-bottom: 1px solid var(--border-subtle) !important;
+  padding: 6px 8px !important;
+  height: 44px !important;
+}
+
+.export-area .task-name {
+  display: flex;
+  gap: 4px;
+}
+
+.export-area .task-button {
+  background-color: var(--bg-card) !important;
+  color: var(--text-secondary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 4px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.export-area .task-button.active {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+  border-color: var(--color-primary) !important;
+}
+
+.reset-export-button {
+  background-color: #7f1d1d !important;
+  color: #fca5a5 !important;
+  border: 1px solid #991b1b !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 4px 8px !important;
+}
+.reset-export-button:hover {
+  background-color: #991b1b !important;
+  color: #ffffff !important;
+}
+
+.export-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  background-color: var(--bg-input);
+  border-bottom: 1px solid var(--border-subtle);
+  line-height: 1.3;
+}
+
+.export-image-container {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  padding: 6px !important;
+}
+
+.export-image-container .infor {
+  color: var(--text-cyan) !important;
+  font-family: monospace !important;
+  font-weight: 600 !important;
+}
+
+.vqa-input {
+  background-color: var(--bg-input) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 4px !important;
+  padding: 4px 6px !important;
+}
+
+/* --------------------------------------------------------------------------
+   Timeline Frame Strip & Modal Overlays
+   -------------------------------------------------------------------------- */
+#video-frames {
+  background-color: var(--bg-header) !important;
+  border-top: 2px solid var(--border-focus) !important;
+}
+
+.video-frame {
+  border: 2px solid transparent !important;
+}
+
+.video-frame.current-frame {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6) !important;
+}
+
+.shortcut-card, .object-list-content, .queries-popup {
+  background-color: var(--bg-panel) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-strong) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6) !important;
+}
+
+.shortcut-key {
+  color: #60a5fa !important;
+  font-weight: bold !important;
+}

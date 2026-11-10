@@ -2,14 +2,14 @@ async function performCombinedSearch() {
     const searchScenes = document.querySelectorAll('.Search_Scene');
     const queries = [];
 
-    // Determine which model button is active
+    // Determine model (defaults to clip)
     const activeModelButton = document.querySelector('.model-option button.active');
-    const modelType = activeModelButton ? activeModelButton.className.split(' ')[0] : 'unknown';
+    const modelType = activeModelButton ? activeModelButton.className.split(' ')[0] : 'clip';
 
     for (const scene of searchScenes) {
-        // Determine which mode button is active within this scene
+        // Determine mode (defaults to temporal-search)
         const activeModeButton = scene.querySelector('.mode-button button.active');
-        const modeType = activeModeButton ? activeModeButton.className.split(' ')[0] : 'unknown';
+        const modeType = activeModeButton ? activeModeButton.className.split(' ')[0] : 'temporal-search';
 
         const query = await getQueryContent(scene);
         if (query.content) {  // Only add non-empty queries
@@ -55,35 +55,22 @@ async function getQueryContent(searchScene) {
     const textArea = searchScene.querySelector('textarea[name="Text_Query"]');
     const imageDropArea = searchScene.querySelector('.image-drop-area');
     const soundTextArea = searchScene.querySelector('textarea[name="Sound_Text"]');
-    let detailsTextArea="";
-    if (searchScene.querySelector('textarea[name="QunNhiuChien_Query"]')===null){
-        // const detailsTextArea = "";
-    } else{
-        detailsTextArea= searchScene.querySelector('textarea[name="QunNhiuChien_Query"]');
+    let detailsTextArea = "";
+    if (searchScene.querySelector('textarea[name="QunNhiuChien_Query"]') !== null) {
+        detailsTextArea = searchScene.querySelector('textarea[name="QunNhiuChien_Query"]').value;
     }
 
-    if (textArea.style.display !== 'none') { 
-        const originalText = textArea.value;
-        if (document.getElementById('translate-checkbox').checked){
-            const translatedText = await translateText(originalText);
-            const translatedDetailText= await translateText(detailsTextArea.value)
-            textArea.value = translatedText;
-            detailsTextArea.value = translatedDetailText
-            return { type: 'text', content: translatedText,detail: translatedDetailText };
-        }
-        else
-            return { type: 'text', content: originalText };
-    } else if (imageDropArea.style.display === 'flex') {
+    if (textArea && textArea.style.display !== 'none') { 
+        return { type: 'text', content: textArea.value, detail: detailsTextArea };
+    } else if (imageDropArea && imageDropArea.style.display === 'flex') {
         const img = imageDropArea.querySelector('img');
-        const translatedDetailText= await translateText(detailsTextArea.value);
-        detailsTextArea.value = translatedDetailText
         if (img) {
-            return { type: 'image', content: img.src,detail: translatedDetailText }; // Send the full image data
+            return { type: 'image', content: img.src, detail: detailsTextArea };
         }
-    } else if (soundTextArea.style.display !== 'none') {
+    } else if (soundTextArea && soundTextArea.style.display !== 'none') {
         return { type: 'sound', content: soundTextArea.value };
     }
-    return { type: 'text', content: '' ,detail: detailsTextArea};
+    return { type: 'text', content: '', detail: detailsTextArea };
 }   
 
 
@@ -102,13 +89,13 @@ async function performPagnitionCombinedSearch() {
     const searchScenes = document.querySelectorAll('.Search_Scene');
     const queries = [];
 
-    // Determine which model button is active
+    // Determine model (defaults to clip)
     const activeModelButton = document.querySelector('.model-option button.active');
-    const modelType = activeModelButton ? activeModelButton.className.split(' ')[0] : 'unknown';
+    const modelType = activeModelButton ? activeModelButton.className.split(' ')[0] : 'clip';
 
-    // Determine which mode button is active
+    // Determine mode (defaults to temporal-search)
     const activeModeButton = document.querySelector('.mode-button button.active');
-    const modeType = activeModeButton ? activeModeButton.className.split(' ')[0] : 'unknown';
+    const modeType = activeModeButton ? activeModeButton.className.split(' ')[0] : 'temporal-search';
 
     for (const scene of searchScenes) {
         const query = await getQueryContent(scene);

@@ -31,38 +31,63 @@ document.addEventListener('DOMContentLoaded', function() {
 let activeTask = 'kis';
 let vqaInputs = {};
 
-// Toggles between KIS and VQA tasks, updating the UI
+// Toggles between KIS, TRAKE, and VQA tasks, updating the UI
 function toggleTask(task) {
   activeTask = task;
   const kisButton = document.getElementById('kis');
+  const trakeButton = document.getElementById('trake');
   const vqaButton = document.getElementById('vqa');
   const exportImages = document.getElementById('export-images');
+  const globalTaskSelect = document.getElementById('global-task-select');
 
-  // Update export area
+  if (globalTaskSelect && globalTaskSelect.value !== task) {
+    globalTaskSelect.value = task;
+  }
+
+  [kisButton, trakeButton, vqaButton].forEach(btn => {
+    if (btn) btn.classList.remove('active');
+  });
+
+  const scene1Title = document.getElementById('scene-1-title');
+  const scene2Title = document.getElementById('scene-2-title');
+  const textQuery1 = document.getElementById('Text-Query-First');
+
   if (task === 'kis') {
-    kisButton.classList.add('active');
-    vqaButton.classList.remove('active');
-    exportImages.classList.remove('vqa-mode');
-  } else {
-    kisButton.classList.remove('active');
-    vqaButton.classList.add('active');
-    exportImages.classList.add('vqa-mode');
+    if (kisButton) kisButton.classList.add('active');
+    if (exportImages) exportImages.classList.remove('vqa-mode');
+    if (scene1Title) scene1Title.textContent = "Mô tả Cảnh";
+    if (scene2Title) scene2Title.textContent = "Mô tả phụ (Tuỳ chọn)";
+    if (textQuery1) textQuery1.placeholder = "Nhập mô tả cảnh KIS (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)...";
+  } else if (task === 'trake') {
+    if (trakeButton) trakeButton.classList.add('active');
+    if (exportImages) exportImages.classList.remove('vqa-mode');
+    if (scene1Title) scene1Title.textContent = "Sự kiện 1";
+    if (scene2Title) scene2Title.textContent = "Sự kiện 2";
+    if (textQuery1) textQuery1.placeholder = "Nhập Sự kiện 1 của TRAKE (VD: xe hơi rẽ trái vào ngõ)...";
+  } else if (task === 'vqa') {
+    if (vqaButton) vqaButton.classList.add('active');
+    if (exportImages) exportImages.classList.add('vqa-mode');
+    if (scene1Title) scene1Title.textContent = "Câu hỏi VQA";
+    if (scene2Title) scene2Title.textContent = "Ngữ cảnh phụ (Tuỳ chọn)";
+    if (textQuery1) textQuery1.placeholder = "Nhập câu hỏi VQA (VD: Người đàn ông trong video đang cầm gì trên tay?)...";
   }
 
   // Update fullscreen mode based on active task
   const kisFullscreenButton = document.getElementById('kis-fullscreen');
   const vqaFullscreenButton = document.getElementById('vqa-fullscreen');
 
-  if (task === 'kis') {
-    kisFullscreenButton.classList.add('active');
-    vqaFullscreenButton.classList.remove('active');
+  if (task === 'kis' || task === 'trake') {
+    if (kisFullscreenButton) kisFullscreenButton.classList.add('active');
+    if (vqaFullscreenButton) vqaFullscreenButton.classList.remove('active');
   } else {
-    kisFullscreenButton.classList.remove('active');
-    vqaFullscreenButton.classList.add('active');
+    if (kisFullscreenButton) kisFullscreenButton.classList.remove('active');
+    if (vqaFullscreenButton) vqaFullscreenButton.classList.add('active');
   }
 
   updateExportArea();
-  loadExportContent();
+  if (typeof loadExportContent === 'function') {
+    loadExportContent();
+  }
 }
 
 //---------------------------------------------------------------------------------------------//
@@ -266,8 +291,16 @@ document.addEventListener('DOMContentLoaded', function() {
   exportArea.addEventListener('dragover', allowDrop);
   exportArea.addEventListener('drop', drop);
   resetExportButton.addEventListener('click', resetExportArea);
-  kisButton.addEventListener('click', () => toggleTask('kis'));
-  vqaButton.addEventListener('click', () => toggleTask('vqa'));
+  if (kisButton) kisButton.addEventListener('click', () => toggleTask('kis'));
+  if (vqaButton) vqaButton.addEventListener('click', () => toggleTask('vqa'));
+  const trakeButton = document.getElementById('trake');
+  if (trakeButton) trakeButton.addEventListener('click', () => toggleTask('trake'));
+  const globalTaskSelect = document.getElementById('global-task-select');
+  if (globalTaskSelect) {
+    globalTaskSelect.addEventListener('change', function() {
+      toggleTask(this.value);
+    });
+  }
 
   // Add drag listeners to images
   addDragListeners();

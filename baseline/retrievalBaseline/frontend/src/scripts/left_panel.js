@@ -47,15 +47,16 @@ function cycleThroughTextboxes() {
 
 document.addEventListener('DOMContentLoaded', function() {
     const modelButtons = document.querySelectorAll('.model-option button');
-
-    modelButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            modelButtons.forEach(btn => btn.classList.remove('active'));            
-            this.classList.add('active');
-            const model = this.className.split(' ')[0];
-            switchModel(model);
+    if (modelButtons && modelButtons.length > 0) {
+        modelButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                modelButtons.forEach(btn => btn.classList.remove('active'));            
+                this.classList.add('active');
+                const model = this.className.split(' ')[0];
+                switchModel(model);
+            });
         });
-    });
+    }
 });
 
 function switchModel(model) {
@@ -366,9 +367,11 @@ function switchTab(scene, tabName) {
 
 //------------------------------------------------------------------------//
 
-// Function to switch between modes
+// Function to switch between modes (guarded if mode buttons removed)
 function switchMode(scene, modeName) {
+    if (!scene) return;
     const modeButtons = scene.querySelectorAll('.mode-button button');
+    if (!modeButtons || modeButtons.length === 0) return;
     modeButtons.forEach(button => button.classList.remove('active'));
     
     const activeButton = scene.querySelector(`.${modeName}`);
@@ -377,10 +380,13 @@ function switchMode(scene, modeName) {
     }
 }
 
-// Function to set up mode buttons for a search scene
+// Function to set up mode buttons for a search scene (guarded)
 function setupModeButtons(scene) {
+    if (!scene) return;
     const temporalButton = scene.querySelector('.temporal-search');
     const expansionButton = scene.querySelector('.query-expansion');
+
+    if (!temporalButton || !expansionButton) return;
 
     temporalButton.addEventListener('click', (e) => {
         e.preventDefault();
@@ -477,88 +483,178 @@ function clearImage(previewContainer, dropInstruction, fileInput) {
 
 
 //------------------------------------------------------------------------//
-// Add new search scene
+// Add new search scene (Dynamic TRAKE Events)
 
 function addNewSearchScene() {
     const searchForm = document.getElementById('Search');
+    if (!searchForm) return;
     const existingScenes = searchForm.querySelectorAll('.Search_Scene');
     const newSceneNumber = existingScenes.length + 1;
 
-    // Create a new search scene based on the original HTML structure
-    const newSceneHTML = `
-        <div class="Search_Scene" id="search-scene-${newSceneNumber}">
-            <div class="tab-buttons">
-                <button class="text-button active">
-                    <img src="src/Img/icon-outline-text.png" alt="icon">
-                </button>
-                <button class="image-button">
-                    <img src="src/Img/icon-image-plus.png" alt="icon">
-                </button>
-            </div>
-            
-            <div class="mode-button">
-                <button class="temporal-search active">Temporal</button>
-                <button class="query-expansion">Expansion</button>
-            </div>
+    // Determine current task mode for placeholder/title
+    const taskSelect = document.getElementById('global-task-select');
+    const currentTask = taskSelect ? taskSelect.value : 'trake';
+    const titleLabel = currentTask === 'trake' ? `Sự kiện ${newSceneNumber} (Event ${newSceneNumber})` : `Cảnh ${newSceneNumber} (Scene ${newSceneNumber})`;
 
-            <div class="query-group">
-                <div class="query-content-area">
-                    <textarea name="Text_Query" id="Text-Query-${newSceneNumber}" rows="4" placeholder="Enter query"></textarea>
-                    
-                    <div class="image-drop-area" style="display: none;">
-                        <p class="drop-instruction">Drag and drop image here or click to upload</p>
-                        <input type="file" accept="image/*" style="display: none;" id="Image-Query-${newSceneNumber}">
-                        <div class="preview-upload-container"></div>
-                    </div>
-
+    // Create a new compact search scene without mode-button
+    const newScene = document.createElement('div');
+    newScene.className = 'Search_Scene';
+    newScene.id = `search-scene-${newSceneNumber}`;
+    newScene.innerHTML = `
+        <div class="scene-header-bar">
+            <div class="scene-header-title">
+                <i class="fa fa-step-forward"></i>
+                <span id="scene-${newSceneNumber}-title">${titleLabel}</span>
+            </div>
+            <div class="scene-header-controls">
+                <div class="tab-buttons">
+                    <button type="button" class="text-button active">
+                        <i class="fa fa-font"></i> Text
+                    </button>
+                    <button type="button" class="image-button">
+                        <i class="fa fa-image"></i> Ảnh
+                    </button>
+                </div>
+                <button type="button" class="close-scene-btn" title="Xóa sự kiện này">×</button>
+            </div>
+        </div>
+        <div class="query-group">
+            <div class="query-content-area">
+                <textarea name="Text_Query" id="Text-Query-${newSceneNumber}" rows="3" placeholder="Nhập mô tả sự kiện ${newSceneNumber}..."></textarea>
+                <div class="image-drop-area" style="display: none;">
+                    <p class="drop-instruction">Kéo thả ảnh vào đây hoặc click để chọn ảnh</p>
+                    <input type="file" accept="image/*" style="display: none;" id="Image-Query-${newSceneNumber}">
+                    <div class="preview-upload-container"></div>
                 </div>
             </div>
         </div>
     `;
 
-    // Create a new element from the HTML string
-    const newScene = document.createElement('div');
-    newScene.innerHTML = newSceneHTML.trim();
-    const newSceneElement = newScene.firstChild;
+    // Append to form
+    searchForm.appendChild(newScene);
 
-    // Add a close button
-    const closeButton = document.createElement('button');
-    closeButton.innerHTML = '&times;';
-    closeButton.className = 'close-scene-button';
-    closeButton.addEventListener('click', function() {
-        newSceneElement.remove();
-    });
-    newSceneElement.style.position = 'relative';
-    newSceneElement.insertBefore(closeButton, newSceneElement.firstChild);
+    // Setup close button handler
+    const closeBtn = newScene.querySelector('.close-scene-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            newScene.remove();
+            renumberScenes();
+        });
+    }
 
-    // Append the new scene to the search form
-    searchForm.appendChild(newSceneElement);
+    // Set up tabs
+    setupSearchScene(newScene);
 
-    // Set up event listeners for the new scene
-    setupSearchScene(newSceneElement);
-
-    // Set up image upload for the new scene
-    const imageDropArea = newSceneElement.querySelector('.image-drop-area');
+    // Set up image upload
+    const imageDropArea = newScene.querySelector('.image-drop-area');
     if (imageDropArea) {
         const newFileInput = imageDropArea.querySelector('input[type="file"]');
         const newPreviewContainer = imageDropArea.querySelector('.preview-upload-container');
         setupImageUpload(imageDropArea, newFileInput, newPreviewContainer);
     }
+
+    // Setup enter key press
+    const newTextarea = newScene.querySelector('textarea[name="Text_Query"]');
+    if (newTextarea && typeof handleEnterKeyPress === 'function') {
+        newTextarea.addEventListener('keydown', handleEnterKeyPress);
+    }
+
+    if (newTextarea) {
+        newTextarea.focus();
+    }
 }
 
-// Set up all existing search scenes when the document loads
+// Renumber scenes sequentially
+function renumberScenes() {
+    const scenes = document.querySelectorAll('#Search .Search_Scene');
+    const taskSelect = document.getElementById('global-task-select');
+    const currentTask = taskSelect ? taskSelect.value : 'trake';
+
+    scenes.forEach((scene, index) => {
+        const num = index + 1;
+        scene.id = `search-scene-${num}`;
+        const titleSpan = scene.querySelector('.scene-header-title span');
+        if (titleSpan) {
+            titleSpan.id = `scene-${num}-title`;
+            if (currentTask === 'trake') {
+                titleSpan.textContent = `Sự kiện ${num}`;
+            } else if (currentTask === 'kis') {
+                titleSpan.textContent = num === 1 ? 'Mô tả KIS' : `Bối cảnh ${num}`;
+            } else {
+                titleSpan.textContent = num === 1 ? 'Câu hỏi VQA' : `Bối cảnh ${num}`;
+            }
+        }
+        const ta = scene.querySelector('textarea[name="Text_Query"]');
+        if (ta) {
+            ta.id = num === 1 ? 'Text-Query-First' : (num === 2 ? 'Text-Query-Second' : `Text-Query-${num}`);
+        }
+    });
+}
+
+// Set up event listeners when the document loads
 document.addEventListener('DOMContentLoaded', function() {
+    // Set up existing search scenes
     const searchScenes = document.querySelectorAll('.Search_Scene');
     searchScenes.forEach(setupSearchScene);
-});
 
+    // Setup pre-existing close scene buttons
+    document.querySelectorAll('#Search .Search_Scene .close-scene-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const scene = btn.closest('.Search_Scene');
+            if (scene) {
+                scene.remove();
+                renumberScenes();
+            }
+        });
+    });
+
+    // Wire Add Event button for TRAKE
+    const addBtn = document.getElementById('add-scene-button');
+    if (addBtn) {
+        addBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            addNewSearchScene();
+        });
+    }
+
+    // Wire Clear Scenes button
+    const clearBtn = document.getElementById('clear-scenes-button');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            clearAllTextareas();
+        });
+    }
+
+    // Wire Task Selector Change
+    const taskSelect = document.getElementById('global-task-select');
+    if (taskSelect) {
+        taskSelect.addEventListener('change', function() {
+            renumberScenes();
+            const firstSceneTa = document.querySelector('#search-scene-1 textarea[name="Text_Query"]');
+            if (firstSceneTa) {
+                if (this.value === 'kis') {
+                    firstSceneTa.placeholder = 'Nhập mô tả cảnh KIS (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)...';
+                } else if (this.value === 'trake') {
+                    firstSceneTa.placeholder = 'Nhập mô tả Sự kiện 1 (Sự kiện diễn ra đầu tiên trong chuỗi)...';
+                } else if (this.value === 'vqa') {
+                    firstSceneTa.placeholder = 'Nhập câu hỏi VQA (VD: Có bao nhiêu chiếc xe hơi màu đỏ?...)...';
+                }
+            }
+        });
+    }
+});
 
 function removeAddedScenes() {
     const searchForm = document.getElementById('Search');
+    if (!searchForm) return;
     const scenes = searchForm.querySelectorAll('.Search_Scene');
     scenes.forEach((scene, index) => {
-        if (index >= 2) { // Keep the first two default scenes
+        if (index >= 2) {
             scene.remove();
         }
     });
+    renumberScenes();
 }

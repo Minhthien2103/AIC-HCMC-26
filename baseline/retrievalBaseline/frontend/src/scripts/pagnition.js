@@ -127,9 +127,9 @@ function createPagnitionImageDiv(result, index) {
     div.className = 'img-dis';
     div.innerHTML = `
         <img alt="" class="result" loading="lazy" height="100px" id="${index}" data-src="${imgUrl}" src="${imgUrl}">
-        <div class="infor">${frameInfo}</div>
-        <div name="similarity_search" class="similarity_search"></div>
-        <div class="export_icon"></div>
+        <div class="infor" title="Click trái: xem video | Chuột phải: xem timeline">${frameInfo}</div>
+        <div name="similarity_search" class="similarity_search similarity-search-badge" title="Tìm ảnh tương đồng (Similarity Search)">⚡ Tương đồng</div>
+        <div class="export_icon pin-export-badge" title="Ghim để nộp (Export / Submit)">📌 Ghim</div>
     `;
 
     const img = div.querySelector('img');

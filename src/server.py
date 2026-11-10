@@ -45,6 +45,7 @@ from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.retrieval import RetrievalEngine
 from src.tasks.kis_t import KIStask
 from src.tasks.trake import TrakeTask
+from src.utils.translation import translate_vi_to_en
 
 # Configure logging
 logging.basicConfig(
@@ -153,6 +154,19 @@ class SearchService:
         img_bytes = base64.b64decode(data_url_or_b64)
         return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
+    def _normalize_query_language(self, text: str) -> str:
+        """Transparently translate Vietnamese query to English for OpenAI CLIP embedding."""
+        if not text or not text.strip():
+            return ""
+        if any(ord(c) > 127 for c in text):
+            try:
+                translated = translate_vi_to_en(text)
+                if translated and translated.strip():
+                    return translated.strip()
+            except Exception as e:
+                logger.warning(f"Translation fallback for '{text}': {e}")
+        return text.strip()
+
     def process_temporal_query(
         self,
         first_query: str,
@@ -161,13 +175,15 @@ class SearchService:
     ) -> List[Dict[str, Any]]:
         """Execute single or sequential temporal search with proximity boosting."""
         if not second_query.strip():
-            # Standard single query via KIStask
+            # Standard single query via KIStask (auto-translates internally)
             candidates = self.kis_task.execute(first_query, top_k=top_k)
             return self.format_results(candidates, limit=top_k)
 
-        # Temporal Query: retrieve candidates for both events
-        v1 = self.encoder.encode_text(first_query)
-        v2 = self.encoder.encode_text(second_query)
+        # Temporal Query: normalize language and encode both events
+        q1_en = self._normalize_query_language(first_query)
+        q2_en = self._normalize_query_language(second_query)
+        v1 = self.encoder.encode_text(q1_en)
+        v2 = self.encoder.encode_text(q2_en)
 
         r1 = self.retriever.search(v1, top_k=max(top_k * 2, 2000))
         r2 = self.retriever.search(v2, top_k=max(top_k * 2, 2000))
@@ -200,6 +216,82 @@ class SearchService:
                             max_boost = boost
 
             item_copy["score"] = base_score + max_boost
+            boosted.append(item_copy)
+
+        boosted.sort(key=lambda x: -float(x.get("score", 0.0)))
+        return self.format_results(boosted, limit=top_k)
+
+    def process_multi_event_query(
+        self,
+        queries: List[str],
+        top_k: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """Execute single or sequential temporal search across arbitrary N events (TRAKE)."""
+        clean_queries = [q.strip() for q in queries if q and q.strip()]
+        if not clean_queries:
+            return []
+
+        if len(clean_queries) == 1:
+            candidates = self.kis_task.execute(clean_queries[0], top_k=top_k)
+            return self.format_results(candidates, limit=top_k)
+
+        if len(clean_queries) == 2:
+            return self.process_temporal_query(clean_queries[0], clean_queries[1], top_k=top_k)
+
+        # For N >= 3 events (TRAKE chained temporal matching)
+        event_results = []
+        for q in clean_queries:
+            q_en = self._normalize_query_language(q)
+            vec = self.encoder.encode_text(q_en)
+            res = self.retriever.search(vec, top_k=max(top_k * 2, 2000))
+            event_results.append(res)
+
+        # Group subsequent events by video_id
+        event_by_vid: List[Dict[str, List[Dict[str, Any]]]] = []
+        for res in event_results[1:]:
+            by_vid: Dict[str, List[Dict[str, Any]]] = {}
+            for item in res:
+                vid = item.get("video_id", "")
+                by_vid.setdefault(vid, []).append(item)
+            event_by_vid.append(by_vid)
+
+        MAX_FRAME_GAP = 1800  # ~60 seconds at 30fps
+        boosted: List[Dict[str, Any]] = []
+
+        for item in event_results[0]:
+            item_copy = dict(item)
+            vid = item_copy.get("video_id", "")
+            current_frame = int(item_copy.get("frame_id", 0))
+            base_score = float(item_copy.get("score", 0.0))
+
+            total_boost = 0.0
+            matched_events = 1
+
+            for by_vid in event_by_vid:
+                if vid not in by_vid:
+                    break
+
+                best_sub_boost = 0.0
+                next_frame = None
+                for target in by_vid[vid]:
+                    f2 = int(target.get("frame_id", 0))
+                    gap = f2 - current_frame
+                    if 0 < gap <= MAX_FRAME_GAP:
+                        target_score = float(target.get("score", 0.0))
+                        boost = target_score * (MAX_FRAME_GAP - gap) / MAX_FRAME_GAP
+                        if boost > best_sub_boost:
+                            best_sub_boost = boost
+                            next_frame = f2
+
+                if next_frame is not None:
+                    matched_events += 1
+                    total_boost += best_sub_boost
+                    current_frame = next_frame
+                else:
+                    break
+
+            seq_ratio = matched_events / len(clean_queries)
+            item_copy["score"] = (base_score + total_boost) * seq_ratio
             boosted.append(item_copy)
 
         boosted.sort(key=lambda x: -float(x.get("score", 0.0)))
@@ -327,16 +419,29 @@ def create_app() -> FastAPI:
         try:
             body = await request.body()
             data = json.loads(body.decode("utf-8"))
-            first_query = data.get("First_query", "")
-            next_query = data.get("Next_query", "")
+            queries = data.get("queries")
+            if not queries:
+                first_query = data.get("First_query", "")
+                next_query = data.get("Next_query", "")
+                queries = [q for q in [first_query, next_query] if q and q.strip()]
 
-            results = service.process_temporal_query(first_query, next_query)
+            if not queries:
+                return {
+                    "kq": [],
+                    "fquery": "",
+                    "nquery": "",
+                    "queries": [],
+                    "total_results": 0
+                }
+
+            results = service.process_multi_event_query(queries)
             service.last_results = results
 
             return {
                 "kq": results,
-                "fquery": first_query,
-                "nquery": next_query,
+                "fquery": queries[0] if len(queries) > 0 else "",
+                "nquery": queries[1] if len(queries) > 1 else "",
+                "queries": queries,
                 "total_results": len(results)
             }
         except Exception as e:

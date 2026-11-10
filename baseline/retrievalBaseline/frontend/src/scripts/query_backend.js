@@ -1,12 +1,25 @@
 //------------------------ Search Query ------------------------//
 
+// Handle Enter keypress on query textareas
+function handleEnterKeyPress(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    performSearchFromTextareas();
+  }
+}
 
-// Perform search with debounce (prevents too many requests)
-const performSearch = debounce(async function (firstQuery, nextQuery) {
-  const cacheKey = `${firstQuery}:${nextQuery}`;
+// Perform multi-event search with debounce (supports KIS & TRAKE with N events)
+const performSearchMulti = debounce(async function (queries) {
+  if (!queries || queries.length === 0) {
+    toggleLoadingIndicator(false);
+    return;
+  }
+
+  const cacheKey = queries.join(" || ");
   
   if (searchCache.has(cacheKey)) {
     updateUIWithSearchResults(searchCache.get(cacheKey));
+    toggleLoadingIndicator(false);
     return;
   }
 
@@ -18,24 +31,19 @@ const performSearch = debounce(async function (firstQuery, nextQuery) {
   currentAbortController = new AbortController();
 
   try {
-    let translationPromise = Promise.resolve([firstQuery, nextQuery]);
-    if (document.getElementById('translate-checkbox').checked) {
-      translationPromise = Promise.all([translateText(firstQuery), translateText(nextQuery)]);
-    }
-
-    const [translatedFirstQuery, translatedNextQuery] = await translationPromise;
     const startTime = performance.now();
     const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || "http://localhost:8006";
     const response = await fetch(`${backendBase}/TextQuery`, {
       method: "POST",
-      headers:{
+      headers: {
         'Content-Type': 'application/json',
         'Connection': 'keep-alive',
         'Keep-Alive': 'timeout=1000'
       },
       body: JSON.stringify({
-        First_query: translatedFirstQuery,
-        Next_query: translatedNextQuery,
+        queries: queries,
+        First_query: queries[0] || "",
+        Next_query: queries[1] || "",
       }),
       signal: currentAbortController.signal,
     });
@@ -43,17 +51,11 @@ const performSearch = debounce(async function (firstQuery, nextQuery) {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
     data = await response.json();
-
-
-  const endTime = performance.now();
-  const duration = endTime - startTime;
-
-  console.log(`Fetch operation took ${duration.toFixed(2)} milliseconds`);
+    const duration = performance.now() - startTime;
+    console.log(`Fetch operation took ${duration.toFixed(2)}ms for ${queries.length} events`);
     
     searchCache.set(cacheKey, data.kq);
     updateUIWithSearchResults(data.kq);
-    document.getElementById("Text-Query-First").value = data.fquery;
-    document.getElementById("Text-Query-Second").value = data.nquery;
   } catch (error) {
     if (error.name !== 'AbortError') {
       console.error('Fetch error:', error);
@@ -62,33 +64,39 @@ const performSearch = debounce(async function (firstQuery, nextQuery) {
     toggleLoadingIndicator(false);
   }
 }, 300);
- 
 
-// there are some way to query in UI
-//----------------------------------------------//
-// When start web
+// Backward-compatible wrapper for single/double query
+const performSearch = (firstQuery, nextQuery) => {
+  const qList = [firstQuery, nextQuery].filter(q => q && q.trim());
+  performSearchMulti(qList.length > 0 ? qList : [""]);
+};
+
 // Perform initial search when loading web first time
 async function performInitialSearch() {
-    const firstQuery = ""; // You can set a default query here if needed
-    const nextQuery = "";
-    performSearch(firstQuery, nextQuery);
+  performSearch("", "");
 }
-  
 
-//-----------------------------------------------//
-// query backend
+// Bind Enter keypress to all query textareas
 document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]').forEach(textarea => {
   textarea.addEventListener('keydown', handleEnterKeyPress);
 });
 
-
-// Perform search from text area
+// Perform search from all active text areas
 async function performSearchFromTextareas() {
   toggleLoadingIndicator(true);
   const textareas = document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]');
-  const firstQuery = textareas[0].value;
-  const nextQuery = textareas[1] ? textareas[1].value : "";
-  performSearch(firstQuery, nextQuery);
+  const queries = [];
+  textareas.forEach(ta => {
+    queries.push(ta.value.trim());
+  });
+
+  const activeQueries = queries.filter(q => q.length > 0);
+  if (activeQueries.length === 0) {
+    toggleLoadingIndicator(false);
+    return;
+  }
+
+  performSearchMulti(queries);
 }
 
 document.getElementById("search-button").addEventListener("click", function(event) {
