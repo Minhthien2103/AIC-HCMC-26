@@ -664,3 +664,278 @@ textarea[name="Text_Query"]:focus {
   color: #60a5fa !important;
   font-weight: bold !important;
 }
+
+/* --------------------------------------------------------------------------
+   DRES Integration & Modal Dialog Styling
+   -------------------------------------------------------------------------- */
+.dres-config-btn {
+  background-color: #1e1b4b !important;
+  border-color: #6366f1 !important;
+  color: #c7d2fe !important;
+}
+
+.dres-config-btn:hover {
+  background-color: #312e81 !important;
+  border-color: #818cf8 !important;
+  color: #ffffff !important;
+}
+
+.dres-config-btn.connected {
+  border-color: #10b981 !important;
+  color: #6ee7b7 !important;
+}
+
+.dres-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(3, 7, 18, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: dresFadeIn 0.2s ease-out;
+}
+
+@keyframes dresFadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.dres-modal-content {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 560px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dres-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background-color: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dres-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dres-modal-header h3 i {
+  color: #38bdf8;
+}
+
+.dres-modal-close {
+  font-size: 24px;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.dres-modal-close:hover {
+  color: #f87171;
+}
+
+.dres-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+.dres-status-banner {
+  padding: 10px 14px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.dres-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dres-form-group label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dres-form-group input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  transition: border-color 0.2s;
+}
+
+.dres-form-group input:focus {
+  border-color: var(--border-focus);
+  outline: none;
+}
+
+.dres-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dres-input-row input {
+  flex: 1;
+}
+
+.dres-btn-small {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  color: var(--text-cyan);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.dres-btn-small:hover {
+  background-color: var(--bg-card-hover);
+  border-color: var(--border-focus);
+}
+
+.dres-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.preset-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dres-preset-btn {
+  background-color: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-subtle);
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dres-preset-btn:hover {
+  background-color: #334155;
+  color: #f8fafc;
+  border-color: #64748b;
+}
+
+.dres-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 6px 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dres-divider::before,
+.dres-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dres-divider span {
+  padding: 0 10px;
+}
+
+.dres-form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.dres-form-group.half {
+  flex: 1;
+}
+
+.dres-btn {
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  border: none;
+}
+
+.dres-login-btn {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+}
+
+.dres-login-btn:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+}
+
+.dres-save-btn {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+.dres-save-btn:hover {
+  background-color: #047857;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.4);
+}
+
+.dres-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.dres-modal-footer {
+  padding: 14px 20px;
+  background-color: var(--bg-header);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: flex-end;
+}
+

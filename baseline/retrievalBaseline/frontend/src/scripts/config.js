@@ -13,9 +13,11 @@ window.CONFIG = {
   MEDIA_BASE: "http://localhost:8007",
 
   // DRES Evaluation Server
-  // Official online server: "https://eventretrieval.one"
-  // Contest onsite server:  "http://192.168.20.164:5000"
-  DRES_BASE: "https://eventretrieval.one",
+  // LAN Server: "http://192.168.20.150:8080" or "http://192.168.20.150"
+  // UIT Contest server: "https://aiclub.uit.edu.vn/dres"
+  DRES_BASE: "https://aiclub.uit.edu.vn/dres",
+  DRES_EVALUATION_ID: "bcb482c6-2b9e-4908-877a-e5ccd7c04640",
+  DRES_SESSION_ID: "q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P",
 
   // Default image format extension: '.jpg' (AIC dataset standard) or '.webp'
   IMAGE_EXT: ".jpg"

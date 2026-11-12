@@ -1,4 +1,1 @@
-
-Giờ mục tiêu của tôi là làm sao mà dùng cái pipeline core tech hiện tại của project này, còn frontend, backend, các kết nối của cái baseline (Rồi dữ liệu thì được để trong server cấp), mọi thứ chạy trên máy local vì có GPU (server chỉ là CPU), vậy có khả thi không
-
-lấy từ folder chung
+Thêm v-KIS, qa-KIS

@@ -31,60 +31,26 @@
     <script src="https://vjs.zencdn.net/7.17.0/video.min.js" defer></script>
     <!-- <script src="src/critical.js" async></script> -->
     <script>
-      // Function to clear local storage
-      function clearLocalStorage() {
-          localStorage.removeItem('evaluationID');
-          localStorage.removeItem('contestSessionID');
-          // Add any other items you want to remove here
+      function getEvaluationID() {
+        return localStorage.getItem('evaluationID') || (window.CONFIG && window.CONFIG.DRES_EVALUATION_ID) || 'bcb482c6-2b9e-4908-877a-e5ccd7c04640';
       }
-      
-      // Add event listener for beforeunload
-      window.addEventListener('beforeunload', function (e) {
-          clearLocalStorage();
-          
-          // The following is optional. It will show a dialog to confirm leaving the page.
-          // Most modern browsers no longer display custom messages here.
-          e.preventDefault(); // Cancel the event
-          e.returnValue = ''; // Chrome requires returnValue to be set
-      });
-      </script>
-</head>
-  <body>
-    <script>
-      // Check if the user has entered a name and session ID
-      if (!localStorage.getItem('evaluationID') || !localStorage.getItem('contestSessionID')) {
-        // If not, redirect to the login page
-        //window.location.href = 'login.html';
+      function getContestSessionID() {
+        return localStorage.getItem('contestSessionID') || (window.CONFIG && window.CONFIG.DRES_SESSION_ID) || 'q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P';
       }
-    
-      // Function to use the stored name and session ID
       function useSessionInfo() {
-        const evaluationID = localStorage.getItem('evaluationID') || 'None';
-        const contestSessionID = localStorage.getItem('contestSessionID') || 'None';
-        const userName = localStorage.getItem('userName') || 'Participant';
-        
+        const evaluationID = getEvaluationID();
+        const contestSessionID = getContestSessionID();
+        const userName = localStorage.getItem('userName') || 'Team12';
         console.log('[Session] User:', userName, 'Evaluation:', evaluationID, 'Session:', contestSessionID);
         const userDisplay = document.getElementById('user-name-display');
         if (userDisplay) {
           userDisplay.textContent = userName;
         }
       }
-    
-        // And use the sessionId for your submissions:
-        // (Assuming you have a submit function that uses the session ID)
-        // submitFunction(sessionId);
-      }
-    
-      // Call this function when the page loads
-      window.onload = useSessionInfo;
-    
-      // Add a logout function
-      function logout() {
-        localStorage.removeItem('userName');
-        localStorage.removeItem('sessionId');
-        window.location.href = 'login.html';
-      }
+      window.addEventListener('DOMContentLoaded', useSessionInfo);
     </script>
+</head>
+  <body>
     <header class="header">
       <div class="header-left">
         <button id="shortcut-icon" class="nav-btn" title="Xem danh sách phím tắt">
@@ -127,6 +93,10 @@
           </label>
           <span>Hàng</span>
         </div>
+
+        <button type="button" id="dres-config-btn" class="nav-btn dres-config-btn" title="Cài đặt máy chủ & tài khoản DRES">
+          <i class="fa fa-key"></i> <span id="dres-btn-label">DRES Login</span>
+        </button>
 
         <button type="button" id="export-button" class="action-btn export-action-btn">
           <i class="fa fa-folder-open"></i> Export Area
@@ -547,25 +517,95 @@
       </ul>
     </div>
 
-    <script src="src/scripts/config.js?v=2"></script>
-    <script src="src/scripts/filter_get_infor.js?v=2"></script>
-    <script src="src/scripts/short_cut.js?v=2"></script>
-    <script src="src/scripts/preview.js?v=2"></script>
-    <script src="src/scripts/web_socket.js?v=2"></script>
-    <script src="src/websocket/multi_combined_search.js?v=2"></script>
-    <script src="src/scripts/start_ui.js?v=2"></script>
-    <script src="src/scripts/update_result.js?v=2"></script>
-    <script src="src/scripts/dice.js?v=2"></script>
-    <script src="src/scripts/show_video.js?v=2"></script>
-    <script src="src/scripts/show_videoframe.js?v=2"></script>
-    <script src="src/scripts/export.js?v=2"></script>
-    <script src="src/scripts/group_search.js?v=2"></script>
-    <script src="src/scripts/left_panel.js?v=2"></script>
-    <script src="src/scripts/queries_history.js?v=2"></script>
-    <script src="src/scripts/object_list.js?v=2"></script>
-    <script src="src/scripts/pagnition.js?v=2"></script>
-    <script src="src/scripts/submit_dres.js?v=2"></script>
-    <script src="src/scripts/query_backend.js?v=2"></script>
+    <!-- DRES Configuration & Authentication Modal -->
+    <div id="dresModal" class="dres-modal" style="display: none;">
+      <div class="dres-modal-content">
+        <div class="dres-modal-header">
+          <h3><i class="fa fa-plug"></i> Cấu hình kết nối DRES (AI Challenge 2026)</h3>
+          <span id="close-dres-modal" class="dres-modal-close" title="Đóng">&times;</span>
+        </div>
+
+        <div class="dres-modal-body">
+          <div id="dres-current-status" class="dres-status-banner">
+            <span>Đang kiểm tra trạng thái...</span>
+          </div>
+
+          <div class="dres-form-group">
+            <label for="dres-host-input"><i class="fa fa-server"></i> DRES Server Endpoint:</label>
+            <div class="dres-input-row">
+              <input type="text" id="dres-host-input" value="https://aiclub.uit.edu.vn/dres" placeholder="https://aiclub.uit.edu.vn/dres hoặc http://192.168.20.150:8080">
+              <button type="button" id="dres-test-btn" class="dres-btn-small" title="Kiểm tra kết nối mạng tới Server">
+                <i class="fa fa-stethoscope"></i> Test Ping
+              </button>
+            </div>
+            <div class="dres-presets">
+              <span class="preset-label">Gợi ý nhanh:</span>
+              <button type="button" class="dres-preset-btn" onclick="setDresPreset('https://aiclub.uit.edu.vn/dres')">UIT Web Server</button>
+              <button type="button" class="dres-preset-btn" onclick="setDresPreset('http://192.168.20.150:8080')">LAN :8080 (192.168.20.150:8080)</button>
+              <button type="button" class="dres-preset-btn" onclick="setDresPreset('http://192.168.20.150')">LAN :80 (192.168.20.150)</button>
+            </div>
+          </div>
+
+          <div class="dres-form-group">
+            <label for="dres-eval-input"><i class="fa fa-trophy"></i> Evaluation ID (ID Đề thi):</label>
+            <input type="text" id="dres-eval-input" value="bcb482c6-2b9e-4908-877a-e5ccd7c04640" placeholder="Evaluation UUID (VD: bcb482c6-2b9e-4908-877a-e5ccd7c04640)">
+          </div>
+
+          <div class="dres-divider"><span>Cách 1: Đăng nhập tự động với tài khoản Đội thi</span></div>
+
+          <div class="dres-form-row">
+            <div class="dres-form-group half">
+              <label for="dres-user-input"><i class="fa fa-user"></i> Tên đăng nhập (Team):</label>
+              <input type="text" id="dres-user-input" placeholder="VD: team_12">
+            </div>
+            <div class="dres-form-group half">
+              <label for="dres-pass-input"><i class="fa fa-lock"></i> Mật khẩu:</label>
+              <input type="password" id="dres-pass-input" placeholder="Mật khẩu DRES">
+            </div>
+          </div>
+
+          <button type="button" id="dres-login-btn" class="dres-btn dres-login-btn">
+            <i class="fa fa-sign-in-alt"></i> Đăng nhập DRES lấy Session ID
+          </button>
+
+          <div class="dres-divider"><span>Cách 2: Nhập trực tiếp Contest Session ID</span></div>
+
+          <div class="dres-form-group">
+            <label for="dres-session-input"><i class="fa fa-id-badge"></i> Session ID:</label>
+            <input type="text" id="dres-session-input" value="q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P" placeholder="Dán Session ID nếu đã đăng nhập trên trình duyệt">
+            <small class="dres-hint">
+              💡 Bạn có thể đăng nhập trên web DRES hoặc portal <a href="https://dres-contestant-portal.pages.dev/" target="_blank" style="color: #38bdf8;">dres-contestant-portal</a> rồi dán Session ID vào đây.
+            </small>
+          </div>
+        </div>
+
+        <div class="dres-modal-footer">
+          <button type="button" id="dres-save-btn" class="dres-btn dres-save-btn">
+            <i class="fa fa-save"></i> Lưu cấu hình & Đóng
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="src/scripts/config.js?v=3"></script>
+    <script src="src/scripts/filter_get_infor.js?v=3"></script>
+    <script src="src/scripts/short_cut.js?v=3"></script>
+    <script src="src/scripts/preview.js?v=3"></script>
+    <script src="src/scripts/web_socket.js?v=3"></script>
+    <script src="src/websocket/multi_combined_search.js?v=3"></script>
+    <script src="src/scripts/start_ui.js?v=3"></script>
+    <script src="src/scripts/update_result.js?v=3"></script>
+    <script src="src/scripts/dice.js?v=3"></script>
+    <script src="src/scripts/show_video.js?v=3"></script>
+    <script src="src/scripts/show_videoframe.js?v=3"></script>
+    <script src="src/scripts/export.js?v=3"></script>
+    <script src="src/scripts/group_search.js?v=3"></script>
+    <script src="src/scripts/left_panel.js?v=3"></script>
+    <script src="src/scripts/queries_history.js?v=3"></script>
+    <script src="src/scripts/object_list.js?v=3"></script>
+    <script src="src/scripts/pagnition.js?v=3"></script>
+    <script src="src/scripts/submit_dres.js?v=3"></script>
+    <script src="src/scripts/query_backend.js?v=3"></script>
   </body>
 </html>
 

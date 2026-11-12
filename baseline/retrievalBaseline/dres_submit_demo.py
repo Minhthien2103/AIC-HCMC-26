@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 # 🔧 CẤU HÌNH — ĐIỀN Ở ĐÂY
 # ==============================
 DRES_BASE_URL = "http://<your-dres-host>:5000"   # VD: "http://192.168.28.151:5000"
-SESSION_ID: Optional[str] = None                  # Điền thủ công nếu bạn có sẵn, VD: "abcd-efgh-1234"
+SESSION_ID: Optional[str] = "q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P"                  # Điền thủ công nếu bạn có sẵn, VD: "abcd-efgh-1234"
 USERNAME: Optional[str] = "<username>"            # Dùng khi cần auto-login
 PASSWORD: Optional[str] = "<password>"            # Dùng khi cần auto-login
 DEFAULT_FPS: float = 25.0                         # FPS mặc định để đổi frame -> milliseconds
