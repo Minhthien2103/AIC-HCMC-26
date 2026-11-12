@@ -81,7 +81,7 @@ function setupNavigationButtons() {
 
 async function loadFrameListFromCSV(directory, imageInfo) {
   const videoName = directory.split('/').filter(part => part.startsWith('L') && part.includes('V'))[0] || (imageInfo ? imageInfo.split('-')[0] : '');
-  const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://192.168.28.112:8007";
+  const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://localhost:8007";
   const csvFilePath = `${mediaBase}/map-keyframes/${videoName}.csv`;
   try {
     const response = await fetch(csvFilePath);

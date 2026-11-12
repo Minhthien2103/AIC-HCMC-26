@@ -11,7 +11,9 @@ const imageObserver = new IntersectionObserver((entries, observer) => {
   entries.forEach(entry => {
       if (entry.isIntersecting) {
           const img = entry.target;
-          img.src = img.dataset.src;
+          if (img.dataset.src && (!img.src || img.src === window.location.href)) {
+              img.src = img.dataset.src;
+          }
           observer.unobserve(img);
       }
   });
@@ -26,7 +28,7 @@ function resolveResultImageUrl(result) {
   if (entity.path && (entity.path.startsWith("http://") || entity.path.startsWith("https://"))) {
     return entity.path;
   }
-  const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://192.168.28.112:8007";
+  const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://localhost:8007";
   const video = entity.video || "";
   let frame = entity.frame_id || entity.keyframe_name || "";
   if (typeof frame === 'number') {
@@ -96,7 +98,7 @@ function updateRightPanel_list(results) {
       const imgUrl = resolveResultImageUrl(result);
       img.dataset.src = imgUrl;
 
-      img.src = '';
+      img.src = imgUrl;
       infor.textContent = `${result.entity.video}-${parseFloat(result.entity.time.toFixed(2))}`;
 
       imageObserver.observe(img);

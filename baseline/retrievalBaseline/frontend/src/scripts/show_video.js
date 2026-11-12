@@ -122,7 +122,7 @@ class VideoPlayer {
 
 // Generate the video URL based on video name
 async function getVideo(videoName) {
-    const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://192.168.28.112:8007";
+    const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://localhost:8007";
     return `${mediaBase}/videos/${videoName}.mp4`;
 }
 

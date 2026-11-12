@@ -86,38 +86,77 @@ Trước khi khởi động, hãy đảm bảo trong thư mục `indexes/` đã 
 
 ---
 
-### Bước 2.4: Khởi động Server & Mở Web UI
+## 2. Quy trình khởi động hệ thống hàng ngày (Workflow chuẩn)
 
-Chạy lệnh sau tại thư mục gốc:
+Mỗi khi mở máy tính và đã **kết nối thành công OpenVPN vào mạng trường**, bạn thực hiện các bước sau theo thứ tự:
+
+---
+
+### Bước 2.1: Đảm bảo Media Server cổng 8007 đang chạy trên Ubuntu Server
+Mở terminal SSH vào server (`team12@192.168.28.112`) và kiểm tra:
+```bash
+# Kiểm tra xem media server cổng 8007 có đang chạy không:
+ps aux | grep 8007 | grep -v grep
+
+# Nếu chưa chạy, bật chạy ngầm bằng lệnh:
+nohup python3 -m http.server 8007 --bind 0.0.0.0 --directory /home/team12/aic-data > /home/team12/aic-data/media.log 2>&1 &
+```
+
+---
+
+### Bước 2.2: Mở đường ống SSH Tunnel trên máy Local (Bắt buộc)
+Vì firewall mạng trường chặn cổng lạ giữa 2 dải IP, ta dùng SSH Tunnel để dẫn cổng 8007 về máy:
+
+Mở một tab **PowerShell (Terminal 1)** trên máy bạn và chạy:
+```powershell
+ssh -N -L 8007:localhost:8007 team12@192.168.28.112
+```
+*(Nhập password: `123456`. Giữ nguyên cửa sổ terminal này chạy ngầm trong suốt quá trình làm việc).*
+
+---
+
+### Bước 2.3: Khởi động Backend Web Server (Port 8006)
+Mở một tab **PowerShell (Terminal 2)** tại thư mục dự án, kích hoạt conda `aic26`:
 
 ```powershell
-# Chạy server FastAPI (tự động nạp FAISS, nạp CLIP model lên GPU và host Web UI)
+# 1. Kích hoạt môi trường conda có GPU RTX 4060
+conda activate aic26
+
+# 2. Chạy server FastAPI
 python src/server.py --port 8006
 ```
 
-Khi terminal xuất hiện dòng thông báo:
-```
-INFO: Application startup complete.
-INFO: Uvicorn running on http://0.0.0.0:8006
-```
-
-👉 Mở trình duyệt web và truy cập địa chỉ: **`http://localhost:8006`**
+👉 Mở trình duyệt web truy cập: **`http://localhost:8006`** để bắt đầu tìm kiếm!
 
 ---
 
-### Bước 2.5 (Tùy chọn): Kết nối Server Remote chứa ảnh Keyframe
+## 3. Cách chạy tiếp trích xuất CLIP Features (Resume từ điểm đã dừng)
 
-Sử dụng server trường cấp (IP `192.168.28.112`):
-1. Kết nối OpenVPN vào mạng trường bằng file `.ovpn`.
-2. Trên máy chủ remote, bật HTTP server để chia sẻ ảnh:
-   ```bash
-   python3 -m http.server 8007 --directory /path/to/data
-   ```
-Web UI đã được cấu hình sẵn để tự động tải ảnh từ `http://192.168.28.112:8007`.
+Script trích xuất được tích hợp cơ chế **Resume thông minh**: Tự động quét và bỏ qua trong 1 giây các video đã hoàn thành (như L01–L05), tiếp tục xử lý các video còn lại mà không bao giờ tính toán lại hay làm tràn ổ cứng.
+
+### Lệnh chạy tiếp trích xuất:
+Mở PowerShell, kích hoạt `conda activate aic26` và chạy:
+```powershell
+python scripts/extract_clip_features_gpu.py --batch-size 128 --workers 32
+```
+*Bạn có thể bấm `Ctrl + C` để dừng bất kỳ lúc nào, lần sau gõ lại lệnh trên nó sẽ tự động chạy tiếp từ video kế tiếp.*
+
+### Cập nhật Database sau khi chạy thêm dữ liệu:
+Bất cứ khi nào bạn muốn cập nhật các video mới vừa sinh vào thanh tìm kiếm:
+```powershell
+# 1. Gom các file CSV thành metadata.parquet
+python -m src.offline_pipeline.metadata_loader
+
+# 2. Xây dựng lại FAISS Index
+python -m src.offline_pipeline.build_index
+
+# 3. Khởi động lại server backend:
+python src/server.py --port 8006
+```
 
 ---
 
-## 3. Hướng dẫn sử dụng Giao diện & Cách Nộp bài
+## 4. Hướng dẫn sử dụng Giao diện & Cách Nộp bài
 
 ### Bước 1: Tìm kiếm Keyframe
 1. Chọn nội dung tại menu trên cùng: **`KIS-T`** hoăc **`VQA`** hoặc **`TRAKE`**.

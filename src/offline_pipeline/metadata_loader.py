@@ -23,14 +23,28 @@ class MetadataLoader:
         for csv_path in csv_files:
             video_id = csv_path.stem
             group_name = video_id.split("_")[0]
+
+            # Only index videos in the provided competition dataset (L01 through L24)
+            try:
+                prefix_num = int(group_name[1:])
+                if prefix_num > 24:
+                    continue
+            except ValueError:
+                continue
+
+            # Only include videos whose CLIP feature vector has been extracted
+            npy_path = self.config.CLIP_FEATURES_DIR / f"{video_id}.npy"
+            if not npy_path.exists():
+                continue
             
             try:
                 df = pl.read_csv(csv_path)
                 df = df.with_columns([
                     pl.lit(video_id).alias("video_id"),
-                    pl.col("n").cast(pl.Utf8).str.zfill(3).alias("keyframe_name"),
-                    (pl.col("n") - 1).alias("npy_row_idx"),
-                    pl.col("frame_idx").alias("frame_id"),
+                    pl.col("n").cast(pl.Utf8).str.replace_all(r"[^\d]", "").cast(pl.Int64).cast(pl.Utf8).str.zfill(3).alias("keyframe_name"),
+                    (pl.col("n").cast(pl.Utf8).str.replace_all(r"[^\d]", "").cast(pl.Int64) - 1).alias("npy_row_idx"),
+                    pl.col("frame_idx").cast(pl.Utf8).str.replace_all(r"[^\d]", "").cast(pl.Int64).alias("frame_id"),
+                    pl.col("pts_time").cast(pl.Float64, strict=False).alias("pts_time"),
                 ])
                 df = df.with_columns([
                     pl.format(f"{base_kf}/{{}}/" + "{}.jpg", pl.col("video_id"), pl.col("keyframe_name")).alias("keyframe_path"),

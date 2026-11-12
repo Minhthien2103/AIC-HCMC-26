@@ -9,8 +9,8 @@ window.CONFIG = {
   // Backend WebSocket endpoint
   BACKEND_WS: "ws://localhost:8006",
 
-  // Remote Media Server (300GB CPU server holding extracted keyframes & map CSVs)
-  MEDIA_BASE: "http://192.168.28.112:8007",
+  // Remote Media Server (via SSH Tunnel on port 8007)
+  MEDIA_BASE: "http://localhost:8007",
 
   // DRES Evaluation Server
   // Official online server: "https://eventretrieval.one"

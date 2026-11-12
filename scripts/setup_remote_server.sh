@@ -29,16 +29,16 @@ if ! command -v gdown &> /dev/null; then
 fi
 
 echo "[3/6] Downloading Datasets from Google Drive..."
-# Batch 1 Google Drive ID: 1b7dnMwKc95p4zUaMzpBZ_XDcVNKVj_Kt
+# Batch 1 Google Drive ID: 1F_l-itCAkSRImn2j0yQo7oUhL4xrFG0R
 if [ ! -f "downloads/batch1.zip" ]; then
     echo "Downloading Batch 1 (~10-20GB)..."
-    gdown "1b7dnMwKc95p4zUaMzpBZ_XDcVNKVj_Kt" -O downloads/batch1.zip --fuzzy || true
+    python3 -m gdown "1F_l-itCAkSRImn2j0yQo7oUhL4xrFG0R" -O downloads/batch1.zip --fuzzy || true
 fi
 
-# Batch 2 Google Drive ID: 1Mut7EHi3ql4TEdibXeaSCkKGmjr09S93
+# Batch 2 Google Drive ID: 1GKPSHfyZGpN1yK0gcbzBfydZWtZC_guU
 if [ ! -f "downloads/batch2.zip" ]; then
     echo "Downloading Batch 2 (~10-20GB)..."
-    gdown "1Mut7EHi3ql4TEdibXeaSCkKGmjr09S93" -O downloads/batch2.zip --fuzzy || true
+    python3 -m gdown "1GKPSHfyZGpN1yK0gcbzBfydZWtZC_guU" -O downloads/batch2.zip --fuzzy || true
 fi
 
 echo "[4/6] Extracting Archives into data/..."
