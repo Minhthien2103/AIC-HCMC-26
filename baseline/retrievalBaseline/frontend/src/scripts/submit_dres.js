@@ -345,8 +345,8 @@ async function submit_to_dres_v2() {
 
     let body = {};
 
-    if (currentTask === "kis") {
-        // KIS: Định dạng Video ID + start ms = end ms
+    if (currentTask === "kis" || currentTask === "kis-v") {
+        // KIS-T / KIS-V: Định dạng Video ID + start ms = end ms
         body = {
             "answerSets": [{
                 "answers": [{
@@ -356,7 +356,7 @@ async function submit_to_dres_v2() {
                 }]
             }]
         };
-    } else if (currentTask === "vqa" || currentTask === "qa") {
+    } else if (currentTask === "vqa" || currentTask === "qa" || currentTask === "kis-qa") {
         // Q&A: Định dạng QA-<ANSWER>-<VIDEO_ID>-<TIME(ms)>
         let answerText = "";
         const vqaInput = document.querySelector(".vqa-input");

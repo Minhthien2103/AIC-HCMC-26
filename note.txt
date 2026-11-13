@@ -1,1 +1,60 @@
-Thêm v-KIS, qa-KIS
+================================================================================
+  AIC-HCMC-26 — GHI CHÚ TRẠNG THÁI & KẾ HOẠCH
+  Cập nhật: 2026-11-13 (07:45)
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+A. TRẠNG THÁI HIỆN TẠI — ĐÃ HOÀN THÀNH
+────────────────────────────────────────────────────────────────────────────────
+
+1. Dataset & Feature Extraction:
+   - ✅ Đã trích xuất toàn bộ Keyframes L01–L24 trên server Ubuntu (726 videos, ~734.000 keyframes).
+   - ✅ ĐÃ HOÀN THÀNH trích xuất Google SigLIP-SO400M (ViT-SO400M-14-SigLIP, webli, 1152-dim) cho toàn bộ 726 videos (734.544 frames) vào data/siglip-features-so400m/.
+   - ✅ Đã build thành công indexes/faiss_siglip.index (3.38 GB, 734.544 vectors, 1152-dim IndexFlatIP).
+   - ✅ Đã cấu hình src/config.py mặc định dùng SigLIP-SO400M (vẫn hỗ trợ switch về ViT-B-32 qua AIC_MODEL_TYPE=clip).
+   - ✅ Đã test xác nhận retrieval chạy mượt mà, phân biệt màu sắc và chi tiết vượt trội.
+
+2. Đầy đủ 4 Task thi đấu trên Web UI & Backend:
+   - ✅ KIS-T (Textual KIS): Nhập mô tả văn bản tiếng Việt/Anh → SigLIP search → Nộp KIS format.
+   - ✅ KIS-V (Visual KIS): Kéo thả/chọn ảnh mẫu hoặc click "⚡ Tương đồng" → Encode ảnh bằng SigLIP Image Encoder → FAISS search → Nộp KIS format.
+   - ✅ KIS-QA (Question & Answering): Tìm cảnh chứa câu trả lời → Nhập text đáp án trực tiếp trên từng frame đã ghim trong Export Area → Nộp định dạng chuẩn BTC: QA-<ANSWER>-<VIDEO_ID>-<TIME(ms)>.
+   - ✅ TRAKE (Event Sequence): Ghim nhiều frame theo thứ tự thời gian → Nộp định dạng chuẩn BTC: TR-<VIDEO_ID>-<FRAME_IDS>.
+
+3. DRES Submission:
+   - ✅ Cấu hình sẵn Session ID: q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P
+   - ✅ Evaluation ID: bcb482c6-2b9e-4908-877a-e5ccd7c04640
+   - ✅ Hỗ trợ các endpoint: https://aiclub.uit.edu.vn/dres, http://192.168.20.150:8080, http://192.168.20.150
+
+4. Mô hình có sẵn trên máy Local (Kiểm tra HuggingFace Cache):
+   - ✅ VLM SOTA: Qwen/Qwen2-VL-7B-Instruct (Đã tải sẵn trọn bộ weights 16.5 GB safetensors).
+   - ✅ Text Reranker: BAAI/bge-reranker-base (Đã tải sẵn).
+   - ✅ Speech ASR tiếng Việt: vinai/PhoWhisper-small (Đã tải sẵn).
+
+────────────────────────────────────────────────────────────────────────────────
+B. CƠ SỞ DỮ LIỆU HIỆN TẠI — ĐÃ ĐỦ 100%, KHÔNG CẦN CÀI THÊM GÌ
+────────────────────────────────────────────────────────────────────────────────
+
+- Vector DB: indexes/faiss_siglip.index (3.38 GB, 1152-dim)
+- Metadata DB: indexes/metadata.parquet (Polars DataFrame, 734.544 rows)
+- Backup Index cũ: indexes/faiss_clip.index (1.5 GB, 512-dim)
+- Keyframes Image Storage: Server Ubuntu stream qua SSH Tunnel port 8007
+- KHÔNG CẦN MySQL, PostgreSQL, SQLite, hay Zilliz Cloud cho pipeline thi đấu chính.
+
+────────────────────────────────────────────────────────────────────────────────
+C. BƯỚC TIẾP THEO: VLM RERANKING, OCR, ASR and MULTI-QUERY EXPANSION
+────────────────────────────────────────────────────────────────────────────────
+
+- Tích hợp VLM Reranking Top-30/50 bằng Qwen2-VL-7B-Instruct (4-bit quantization trên RTX 4060):
+  1. FAISS SigLIP quét siêu nhanh lấy Top 30-50 frames tiềm năng.
+  2. Qwen2-VL chấm điểm chi tiết câu query và ảnh để đẩy đúng frame lên Top 1-3.
+
+- OCR & Whisper ASR
+  1. OCR: Chạy PaddleOCR hoặc EasyOCR trên các frame để trích xuất text → Lưu vào bảng ocr_text.parquet.
+  2. ASR: Chạy Whisper nhỏ (whisper-base hoặc whisper-small) bóc tách lời thoại tiếng Việt từ file MP4 gốc → transcripts.parquet.
+  Khi người dùng search, hệ thống vừa so khớp vector hình ảnh, vừa đối chiếu từ khóa trong text/audio → Những câu có tên riêng, biển hiệu hay số xe sẽ tìm trúng 100%.
+
+- Multi-Query Expansion: Dùng một LLM nhỏ phân rã câu hỏi của đề thi thành 3 thành phần:
+  1. Visual Description: Mô tả quang cảnh cho CLIP (ví dụ: "an outdoor street intersection with green trees").
+  2. Salient Objects: Danh sách vật thể trọng tâm ("ambulance, traffic light, bicycle").
+  3. Text / OCR: Các từ khóa có thể xuất hiện dạng chữ ("115, cấp cứu").
+Thực hiện search đa luồng và dùng RRF (Reciprocal Rank Fusion) gộp điểm số lại.

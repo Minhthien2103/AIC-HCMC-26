@@ -1,251 +1,174 @@
 # Full Pipeline — AIC-HCMC 2026 Retrieval System
 
-This document describes the entire system from raw data to a final submission string,
-using the same two-phase structure: **Offline** (run once) and **Online** (every query).
+Tài liệu này mô tả toàn diện kiến trúc hệ thống tìm kiếm truy vấn video phục vụ cuộc thi **AI Challenge TP.HCM 2026 (AIC-HCMC-26)**, được cập nhật theo phiên bản mới nhất:
+- **Trích xuất đặc trưng**: Google SigLIP-SO400M (`ViT-SO400M-14-SigLIP`, 1152 chiều).
+- **Mở rộng truy vấn (Multi-Query Expansion & Typo Correction)**: LLM `Qwen2.5-3B-Instruct` 4-bit chạy local.
+- **Quy mô dữ liệu**: Toàn bộ Batch L (`L01`–`L24`), gồm 726 video với 734.544 keyframe.
+- **Hỗ trợ đầy đủ 4 đầu task thi đấu**: KIS-T, KIS-V, KIS-QA, TRAKE.
+- **Tích hợp nộp bài trực tiếp vào hệ thống DRES của BTC**.
 
 ---
 
-## The Big Picture
+## 1. Tổng quan kiến trúc (The Big Picture)
 
-The system has one fundamental job: given a Vietnamese text description of a video
-moment, find the correct keyframe from a database of 177,321 frames across 873 videos.
-
-It solves this by combining three signals:
-1. **Semantic similarity** — does the image *look like* what the text describes? (CLIP)
-2. **Object presence** — does the image actually *contain* the objects mentioned? (Object Filter)
-3. **Temporal ordering** — for multi-event queries, do events happen in the *right order*? (Temporal Search)
+Hệ thống hoạt động dựa trên nguyên lý **không gian biểu diễn đa phương thức đồng nhất (Unified Multi-modal Embedding Space)** của mô hình Google SigLIP:
+1. **Semantic Similarity (Độ tương đồng ngữ nghĩa hình ảnh - văn bản)**: Cả câu mô tả (text) và khung hình (image) được ánh xạ về cùng không gian vector 1152 chiều.
+2. **Typo Correction & Query Expansion**: Nhận diện lỗi gõ phím tiếng Việt (Telex/VNI) và phân rã truy vấn thành 3 góc nhìn trực quan (Scene, Action, Tags) bằng LLM local trước khi tìm kiếm.
+3. **Temporal Search**: Nhận diện các sự kiện diễn ra tuần tự theo thời gian để lọc và xếp hạng chuỗi khung hình.
+4. **Fast Vector Search (FAISS IndexFlatIP)**: So khớp độ tương đồng Cosine trên 734.544 vectors chỉ trong < 50ms.
 
 ---
 
-## Phase 1: Offline Ingestion (Run Once)
+## 2. Phase 1: Offline Ingestion (Xử lý tiền kỳ một lần)
 
-This phase happens before any user searches. It transforms raw data files into fast, searchable indexes.
+### 2.1 — Master Metadata Table (`indexes/metadata.parquet`)
+- **Nguồn dữ liệu**: Các file CSV ánh xạ do BTC cung cấp cho 726 video (`L01` đến `L24`).
+- **Nội dung lưu trữ**:
+  - `video_id`: Mã video (ví dụ `L20_V015`).
+  - `keyframe_name`: Tên file ảnh (ví dụ `299`).
+  - `frame_id`: Chỉ số frame gốc trong file video MP4 — **đây là giá trị chính xác để nộp bài**.
+  - `pts_time`: Mốc thời gian thực tế trong video tính bằng giây.
+  - `faiss_idx`: Chỉ số nguyên liên tục $(0 \dots 734.543)$ khớp 1-1 với dòng trong FAISS index.
+  - `keyframe_path`: Đường dẫn file ảnh keyframe.
+- **Định dạng**: Apache Parquet nén Snappy, đọc siêu tốc bằng Polars DataFrame.
 
----
-
-### 1.1 — Map-Keyframes CSV → Master Metadata Table
-**File:** `src/offline_pipeline/metadata_loader.py`
-**Output:** `indexes/metadata.parquet`
-
-The organizers provided one `.csv` file per video (873 total). Each CSV maps every
-keyframe to its position in the original video file.
-
-For every row in every CSV, we store:
-
-| Column | Meaning |
-|---|---|
-| `video_id` | e.g. `L29_V003` |
-| `keyframe_name` | e.g. `299` (the filename) |
-| `frame_id` | The **original MP4 frame index** — this is what you submit to the competition |
-| `pts_time` | The timestamp in seconds |
-| `faiss_idx` | A global counter (0, 1, 2 … 177320) that links each row to a row in the FAISS index |
-| `keyframe_path` | Absolute path to the JPEG file on disk |
-
-All 873 CSVs are concatenated into a single Parquet file. This is the central registry
-that every other component reads from.
-
-> **Critical:** `frame_id` (from `frame_idx` in the CSV) is **not** the keyframe filename.
-> Keyframe `299.jpg` maps to `frame_id = 17932` in the original MP4. You always submit `17932`, never `299`.
+### 2.2 — SigLIP-SO400M Feature Extraction & FAISS Index
+- **Model**: `ViT-SO400M-14-SigLIP` (`timm/ViT-SO400M-14-SigLIP`, pretrained `webli`).
+- **Đặc trưng**: Vector 1152 chiều float32 được chuẩn hóa $L_2$ (`normalize=True`).
+- **Index**: `indexes/faiss_siglip.index` (Dung lượng 3.38 GB, chứa 734.544 vector, dùng `IndexFlatIP`).
+- **Ưu điểm so với CLIP ViT-B-32 cũ**:
+  - Phân biệt màu sắc, chi tiết trang phục, biển hiệu, góc máy vượt trội.
+  - Loại bỏ hoàn toàn hiện tượng nhầm lẫn giữa các vật thể có màu sắc tương tự.
 
 ---
 
-### 1.2 — CLIP Feature Files (.npy) → FAISS Index
-**File:** `src/offline_pipeline/build_index.py`
-**Output:** `indexes/faiss_clip.index`
-
-The organizers also pre-computed a CLIP visual embedding for every keyframe and saved
-them as `.npy` files (one per video). Each embedding is a 512-dimensional float32 vector
-that encodes *what the image looks like* in CLIP's semantic space.
-
-We load all 873 `.npy` files, concatenate them into one giant matrix of shape
-`[177321, 512]`, L2-normalize every row, and hand the whole matrix to FAISS.
-
-FAISS builds an `IndexFlatIP` (Inner Product) index — a structure that can find the
-closest vectors to any query in milliseconds, even across 177,000 entries.
-
-**The key constraint:** These vectors were computed by the organizers using `ViT-B-32`.
-We cannot change them. The quality ceiling of every CLIP-based search is set by whatever
-`ViT-B-32` understood about each frame when it encoded it.
-
----
-
-### 1.3 — Object JSON Files → Object Store
-**File:** `src/offline_pipeline/objects_loader.py`
-**Output:** `indexes/objects.parquet`
-
-For every keyframe, the organizers ran an OpenImages object detector and saved the
-results as `.json` files. Each file lists up to 100 detected objects with their confidence
-scores and bounding boxes.
-
-We parse all of these JSONs and flatten them into a single Parquet table:
-one row per detected object instance, with columns `video_id`, `keyframe_name`,
-`faiss_idx`, `object_label`, and `confidence`.
-
-We discard any detection with `confidence < 0.3` to remove noise.
-This leaves 1,122,384 clean object detections across all available videos.
-
-**The key constraint:** The object labels come from the OpenImages vocabulary (~600 nouns).
-Colors and adjectives are not object classes. `"Red shirt"` does not exist in this database —
-only `"Shirt"` does.
-
----
-
-## Phase 2: Online Query Pipeline (Every Search)
-
-This phase runs every time the user presses Search. It processes the query and ranks the 177,321 frames.
-
----
-
-### 2.1 — Vietnamese → English Translation
-**Component:** `deep_translator.GoogleTranslator` (inside each task class)
-
-CLIP's text encoder was trained almost entirely on English text. Feeding it Vietnamese
-produces garbage vectors. Every query is therefore translated to English first.
-
-If translation fails (network error), we fall back to the original query text silently
-and continue — a bad vector is still better than a crash.
-
----
-
-### 2.2 — Text → CLIP Vector
-**File:** `src/online_pipeline/query_encoder.py`
-
-The translated English query is passed through the CLIP text encoder (`ViT-B-32`, `openai` weights).
-
-This produces one 512-dimensional vector that represents *the meaning of the text*.
-
-The key property: this vector lives in the **same semantic space** as the image vectors in the FAISS index. A text about a person speaking outdoors will naturally be close to image vectors of frames showing a person speaking outdoors.
-
----
-
-### 2.3 — Temporal Detection (Branch)
-**File:** `src/online_pipeline/temporal_search.py`
-
-Before searching, the system checks if the query contains temporal keywords such as
-`"then"`, `"after"`, `"sau đó"`, `"tiếp theo"`, etc.
-
-**If NO temporal keywords:** proceed directly to FAISS search (Step 2.4).
-
-**If temporal keywords found:** split the query into sub-events (e.g. `"A then B"` → `["A", "B"]`).
-Encode each sub-event independently. Retrieve top-K candidates for each.
-Then find videos where sub-event A appears in an earlier keyframe than sub-event B.
-Score these valid chronological chains highly. Fall back to standard FAISS search if no chains are found.
-
----
-
-### 2.4 — FAISS Search → Top-K Candidates
-**File:** `src/online_pipeline/retrieval.py`
-
-The query vector is compared against all 177,321 image vectors in the FAISS index using
-inner product (which equals cosine similarity because all vectors are L2-normalized).
-
-The top-K most similar frames are returned as a list of dicts, each containing the full
-metadata row (video_id, frame_id, score, keyframe_path, etc.) joined from `metadata.parquet`.
-
-At this point, the score is a pure cosine similarity: **0.0 = completely unrelated, 1.0 = perfect match.**
-
----
-
-### 2.5 — Object Filter / Boost
-**File:** `src/online_pipeline/object_filter.py`
-
-The system scans the translated query for words that match known OpenImages labels
-using a Regex with simple plural support (e.g. `"trees"` → matches label `"Tree"`).
-
-If matches are found (e.g. `["Shirt", "Tree"]`), the system looks up each candidate
-frame in `objects.parquet`. Any frame that contains at least one of the required objects
-(at confidence ≥ 0.3) receives a flat bonus of `+0.3` to its score.
-
-**Current formula:**
-```
-final_score = clip_cosine_score + 0.3  (if ≥ 1 required object found in frame)
-final_score = clip_cosine_score + 0.0  (if no required objects found)
-```
-
-The results are re-sorted by `final_score` descending and returned.
-
-**Known limitation:** The boost is a flat constant. A frame with 5 matching objects
-scores the same as a frame with 1. Proportional scoring is a planned tuning item.
-
----
-
-### 2.6 — Results Displayed in UI
-**File:** `app.py`
-
-The top-K frames are displayed in a 3-column grid. For each frame:
-- The keyframe JPEG is shown (path rebuilt dynamically from `config.KEYFRAMES_DIR` to survive project folder renames)
-- The `video_id` and `frame_id` are shown
-- The final score is shown
-- The matched objects (if any) are listed
-- A submission string (`L29_V003, 17932`) is shown in a copyable code block
-
----
-
-## Task-Specific Heads
-
-### KIS-T (Known Item Search — Textual)
-**Input:** A Vietnamese text description.
-**Pipeline:** Translate → Encode → Temporal Check → FAISS → Object Boost → Display top-K.
-**Output:** `video_id, frame_id` for each result.
-
-### VQA (Visual Question Answering)
-**Input:** A question about a video moment.
-**Pipeline:** Translate → Encode → FAISS (top-5) → Object Boost → for each candidate, pass the keyframe JPEG + question to `Qwen2-VL-7B` → return the VLM answer.
-**Output:** `video_id, frame_id, answer` for each candidate.
-
-### TRAKE (Temporal Retrieval of Anchoring Keyframes)
-**Phase A — Find the video:** Encode the overall video description → FAISS top-500 → group by `video_id` → take the max frame score per video → rank videos → pick the top candidates.
-**Phase B — Find each event:** For each selected video, encode each event description → search only within that video's keyframes → pick the best frame per event.
-**Temporal constraint:** Verify `frame_id_1 < frame_id_2 < ... < frame_id_N`.
-**Output:** `video_id, frame_id_1, frame_id_2, ...`
-
----
-
-## Data Flow Diagram
+## 3. Phase 2: Online Retrieval Pipeline (Khi người dùng tìm kiếm)
 
 ```
-[User Query (Vietnamese)]
-        │
-        ▼
-[GoogleTranslator → English]
-        │
-        ▼
-[CLIP Text Encoder → 512-dim vector]
-        │
-        ├──[Temporal keywords?]──YES──► [Split → encode each event → find chronological chains]
-        │                                                    │
-        NO                                                   │
-        │                                                    │
-        ▼                                                    ▼
-[FAISS IndexFlatIP Search → top-K candidates] ◄─────────────┘
-        │
-        ▼
-[Object Filter: Regex → labels → lookup objects.parquet → +0.3 boost]
-        │
-        ▼
-[Re-sort by final_score]
-        │
-        ▼
-[Streamlit UI: images + submission strings]
+[Truy vấn Tiếng Việt của người dùng]
+                 │
+                 ▼
+   [QueryExpander: Qwen2.5-3B-Instruct (4-bit)]
+     ├── 1. Tự động sửa lỗi chính tả / Telex (VD: "tay đưa" -> "tay đua")
+     └── 2. Phân rã thành 3 prompt Tiếng Anh chuyên biệt:
+            • Prompt 1: Chi tiết bối cảnh trực quan (Scene description)
+            • Prompt 2: Trọng tâm chủ thể & hành động (Subject & Action)
+            • Prompt 3: Từ khóa vật thể & thuộc tính (Tags & Attributes)
+                 │
+                 ▼
+     [SigLIP Text Encoder (ViT-SO400M)]
+     ├── Encode 3 prompts -> 3 vector 1152-dim
+     └── Weighted Blending: v_query = 0.5*v1 + 0.25*v2 + 0.25*v3 (L2 normalized)
+                 │
+                 ├── [Có từ khóa thời gian? (sau đó, rồi, tiếp theo)] ──► Temporal Multi-Event Search
+                 │
+                 ▼
+     [FAISS IndexFlatIP Search (734.544 vectors)]
+                 │
+                 ▼ (Thời gian < 50ms)
+     [Join Metadata (video_id, frame_id, pts_time, image_path)]
+                 │
+                 ▼
+     [Hiển thị kết quả trên Web UI & Nộp bài DRES 1-Click]
 ```
+
+### 3.1 — Multi-Query Expansion & Typo Correction
+- **File**: `src/online_pipeline/query_expander.py`
+- **Bộ nhớ**: Chạy lượng tử hóa 4-bit (`BitsAndBytesConfig`, `nf4`), chỉ chiếm **2.05 GB VRAM**.
+- **Cơ chế**:
+  - Nếu gặp từ gõ sai ngữ nghĩa (ví dụ `tay đưa xe đạp` thay vì `tay đua xe đạp`), mô hình nhận diện ngữ cảnh và tự sửa về `cyclist / bicycle racer`.
+  - Sinh 3 mô tả trực quan bổ trợ cho nhau nhằm bao phủ nhiều khía cạnh của video.
+  - Có bộ nhớ đệm (LRU Cache) để các truy vấn lặp lại trả về ngay lập tức (0.001s).
+  - Có cơ chế Fallback tự động sang Google GTX translation (`translate.googleapis.com`) nếu GPU bận.
+
+### 3.2 — Weighted Embedding Blending
+- Vector truy vấn tổng hợp:
+  $$\vec{v}_{\text{blend}} = \text{Normalize}\Big(0.5 \cdot \vec{v}_{\text{scene}} + 0.25 \cdot \vec{v}_{\text{action}} + 0.25 \cdot \vec{v}_{\text{tags}}\Big)$$
+- Giúp kết quả tìm kiếm vừa đúng toàn cảnh bối cảnh, vừa bắt đúng hành động và vật thể chi tiết.
+
+### 3.3 — Temporal Detection & Chronological Search
+- **File**: `src/online_pipeline/temporal_search.py`
+- Khi truy vấn chứa các từ nối thời gian (`"sau đó"`, `"tiếp theo"`, `"then"`, `"after"`):
+  - Phân tách thành chuỗi các sự kiện con: $E_1 \rightarrow E_2 \rightarrow \dots \rightarrow E_n$.
+  - Tìm kiếm ứng viên cho từng sự kiện.
+  - Lọc và chấm điểm cao cho các video thỏa mãn điều kiện thời gian: $\text{frame\_id}(E_1) < \text{frame\_id}(E_2)$.
 
 ---
 
-## Key Files Reference
+## 4. Chi tiết 4 đầu Task thi đấu
 
-| File | Role |
-|---|---|
-| `src/config.py` | All paths and tunable constants |
-| `src/offline_pipeline/metadata_loader.py` | CSV → `metadata.parquet` |
-| `src/offline_pipeline/build_index.py` | `.npy` files → `faiss_clip.index` |
-| `src/offline_pipeline/objects_loader.py` | JSON files → `objects.parquet` |
-| `src/online_pipeline/query_encoder.py` | Text → CLIP vector |
-| `src/online_pipeline/retrieval.py` | FAISS search + metadata join |
-| `src/online_pipeline/object_filter.py` | Object presence scoring |
-| `src/online_pipeline/temporal_search.py` | Temporal keyword detection + chronological ranking |
-| `src/online_pipeline/vlm_pipeline.py` | Qwen2-VL-7B inference (VQA + TRAKE event extraction) |
-| `src/tasks/kis_t.py` | KIS-T task orchestrator |
-| `src/tasks/vqa.py` | VQA task orchestrator |
-| `src/tasks/trake.py` | TRAKE task orchestrator |
-| `main_ingest.py` | Entry point for offline ingestion |
-| `app.py` | Streamlit UI |
+### 4.1 — KIS-T (Textual Known-Item Search)
+- **Mục tiêu**: Cho một đoạn mô tả văn bản tiếng Việt/Anh, tìm chính xác video và frame tương ứng.
+- **Quy trình**:
+  1. Người dùng nhập câu mô tả vào thanh tìm kiếm.
+  2. `QueryExpander` sửa lỗi và sinh 3 prompt tiếng Anh.
+  3. SigLIP mã hóa và tìm Top-100/200 ứng viên từ FAISS.
+  4. Người dùng quan sát lưới kết quả, click chọn khung hình đúng nhất.
+  5. Bấm nút **"Nộp DRES"** trực tiếp trên thẻ ảnh hoặc xuất mã nộp: `<video_id>, <frame_id>`.
+
+---
+
+### 4.2 — KIS-V (Visual Known-Item Search)
+- **Mục tiêu**: Đề thi là 1 đoạn video clip 5 giây (hoặc một bức ảnh mẫu). Thí sinh phải xác định video nào và ở giây thứ mấy chứa phân cảnh đó.
+- **Quy trình hiện tại**:
+  1. Khi video 5s chiếu lặp trên màn hình thi, người dùng nhấn `Win + Shift + S` chụp 1 khung hình rõ nét nhất.
+  2. Kéo thả file ảnh chụp vào ô **Tìm kiếm ảnh (Visual KIS)** hoặc dán từ clipboard.
+  3. Backend truyền ảnh qua `SigLIP Image Encoder` $\rightarrow$ sinh vector 1152 chiều $\rightarrow$ truy vấn FAISS.
+  4. Vì ảnh mẫu cắt từ cùng video gốc trong dataset, độ tương đồng Cosine đạt cực cao ($> 0.85 - 0.95$), frame đáp án xuất hiện ngay tại **Top 1**.
+  5. Người dùng click nộp bài trực tiếp vào DRES.
+- **Định hướng mở rộng (Hybrid Multi-Modal KIS-V)**:
+  - Cho phép kết hợp: `[Ảnh chụp từ clip 5s]` + `[Mô tả bổ trợ ngắn (Text)]`.
+  - Phù hợp cho các cảnh khó (ví dụ: cảnh đường phố chung chung nhiều xe giống nhau, nhưng có thêm mô tả *"xe tải màu đỏ vượt đèn"* để định hướng trọng tâm).
+
+---
+
+### 4.3 — KIS-QA (Question & Answering)
+- **Mục tiêu**: Đề thi đặt một câu hỏi về một chi tiết trong video (Ví dụ: *"Người đàn ông áo xanh cầm vật gì trên tay?"*).
+- **Quy trình**:
+  1. Dùng thanh tìm kiếm để xác định phân cảnh xảy ra sự việc.
+  2. Bấm nút **Ghim (Pin)** khung hình nghi vấn vào khay làm bài (Export Area).
+  3. Nhập trực tiếp câu trả lời dạng chữ vào ô `Đáp án QA` trên khung hình đã ghim.
+  4. Hệ thống tự động tạo chuỗi nộp đúng chuẩn BTC:
+     ```
+     QA-<ANSWER>-<VIDEO_ID>-<TIME_MS>
+     ```
+     *(Trong đó `TIME_MS` được tính tự động từ `pts_time * 1000`)*.
+  5. Bấm nộp trực tiếp sang DRES bằng 1 click.
+
+---
+
+### 4.4 — TRAKE (Temporal Retrieval of Anchoring Keyframes)
+- **Mục tiêu**: Tìm một chuỗi gồm nhiều mốc hành động liên tiếp trong cùng một video theo đúng thứ tự thời gian.
+- **Quy trình**:
+  1. Tìm kiếm và bấm Ghim (Pin) các frame thể hiện từng sự kiện theo thứ tự xuất hiện.
+  2. Hệ thống kiểm tra điều kiện thời gian:
+     $$\text{frame\_id}_1 < \text{frame\_id}_2 < \dots < \text{frame\_id}_n$$
+  3. Tự động sinh chuỗi nộp chuẩn TRAKE:
+     ```
+     TR-<VIDEO_ID>-<FRAME_1>-<FRAME_2>-...
+     ```
+  4. Bấm nộp trực tiếp vào DRES.
+
+---
+
+## 5. DRES Submission Pipeline
+
+Hệ thống kết nối trực tiếp với server chấm thi DRES qua module `src/dres_client.py`:
+- **Endpoint**: `https://aiclub.uit.edu.vn/dres` (hoặc mạng nội bộ thi đấu `http://192.168.20.150:8080`).
+- **Session ID**: Lưu trong `src/config.py` và có thể chỉnh sửa động từ Web UI.
+- **Xử lý Batch L vs Batch K**:
+  - Đề thi thử hiện tại sử dụng evaluation ID `bcb482c6-2b9e-4908-877a-e5ccd7c04640` (Chỉ chấp nhận các video `Lxx_Vxxx`).
+  - Hệ thống tự động kiểm tra task target để đảm bảo không nộp nhầm tập dữ liệu gây lỗi 500.
+
+---
+
+## 6. Kế hoạch phát triển tiếp theo (Roadmap)
+
+1. **VLM Reranking Top-30/50 (Qwen2-VL-7B-Instruct)**:
+   - Dùng SigLIP FAISS lấy nhanh Top-30 khung hình tiềm năng (~50ms).
+   - Dùng Qwen2-VL-7B (4-bit, ~4.5 GB VRAM) chấm điểm tương quan chi tiết giữa câu hỏi và từng khung hình để đẩy khung hình chuẩn xác nhất lên Top 1–3.
+2. **Hybrid KIS-V (Image + Text Composed Query)**:
+   - Hỗ trợ nhập kèm text gợi ý khi tìm kiếm bằng ảnh trong KIS-V để xử lý các phân cảnh gây nhiễu.
+3. **OCR & Whisper ASR**:
+   - Trích xuất chữ biển hiệu, text màn hình (PaddleOCR).
+   - Nhận dạng giọng nói/lời thoại tiếng Việt (vinai/PhoWhisper-small có sẵn trong cache).

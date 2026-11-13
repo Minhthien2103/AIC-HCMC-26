@@ -57,7 +57,7 @@
           <i class="fa fa-keyboard"></i> Phím tắt
         </button>
 
-        <div class="object-list-button-container">
+        <div class="object-list-button-container" style="display: none;">
           <button id="show-object-list" class="nav-btn">
             <i class="fa fa-tags"></i> Đối tượng
           </button>
@@ -67,9 +67,10 @@
         <div class="task-selector-wrapper">
           <label for="global-task-select"><i class="fa fa-bullseye"></i> Task:</label>
           <select id="global-task-select" class="task-dropdown">
-            <option value="kis" selected>🎯 KIS-T (Textual Known-Item)</option>
+            <option value="kis" selected>🎯 KIS-T (Textual KIS)</option>
+            <option value="kis-v">🖼️ KIS-V (Visual KIS)</option>
+            <option value="kis-qa">❓ KIS-QA (Question & Answering)</option>
             <option value="trake">⏱️ TRAKE (Event Sequence)</option>
-            <option value="vqa">❓ VQA (Question Answering)</option>
           </select>
         </div>
       </div>
@@ -140,8 +141,8 @@
                     <textarea name="Text_Query" id="Text-Query-First" rows="3" placeholder="Nhập mô tả Sự kiện 1 (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)..."></textarea>
                     
                     <div class="image-drop-area" style="display: none;">
-                      <p class="drop-instruction">Kéo thả ảnh vào đây hoặc click để chọn ảnh</p>
-                      <input type="file" accept="image/*" style="display: none;" id="Image-Query-1">
+                      <p class="drop-instruction">Kéo thả ảnh / video 5s hoặc bấm Ctrl+V để dán ảnh chụp</p>
+                      <input type="file" accept="image/*,video/*" style="display: none;" id="Image-Query-1">
                       <div class="preview-upload-container"></div>
                     </div>
                   </div>
@@ -171,8 +172,8 @@
                     <textarea name="Text_Query" id="Text-Query-Second" rows="3" placeholder="Nhập mô tả Sự kiện 2 (Sự kiện diễn ra tiếp theo sau sự kiện 1)..."></textarea>
                     
                     <div class="image-drop-area" style="display: none;">
-                      <p class="drop-instruction">Kéo thả ảnh vào đây hoặc click để chọn ảnh</p>
-                      <input type="file" accept="image/*" style="display: none;" id="Image-Query-2">
+                      <p class="drop-instruction">Kéo thả ảnh / video 5s hoặc bấm Ctrl+V để dán ảnh chụp</p>
+                      <input type="file" accept="image/*,video/*" style="display: none;" id="Image-Query-2">
                       <div class="preview-upload-container"></div>
                     </div>
                   </div>
@@ -378,8 +379,9 @@
            
             <div class="task-name">
               <button class="task-button active" id="kis">🎯 KIS-T</button>
+              <button class="task-button" id="kis-v">🖼️ KIS-V</button>
+              <button class="task-button" id="kis-qa">❓ KIS-QA</button>
               <button class="task-button" id="trake">⏱️ TRAKE</button>
-              <button class="task-button" id="vqa">❓ VQA</button>
             </div>
             
             <div class="export-buttons">

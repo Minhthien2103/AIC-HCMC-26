@@ -18,33 +18,31 @@ INDEX_DIR = BASE_DIR / "indexes"
 # ── Data paths (confirmed from actual directory structure) ────────────────────
 VIDEOS_DIR        = DATA_DIR / "raw_videos"                 # Full videos
 KEYFRAMES_DIR     = _env_path("AIC_KEYFRAMES_DIR", DATA_DIR / "keyframes")
-CLIP_FEATURES_DIR = DATA_DIR / "clip-features-32"           # LXX_Vxxx.npy, one per video, [N, 512]
 MAP_KEYFRAMES_DIR = DATA_DIR / "map-keyframes"              # LXX_Vxxx.csv (n, pts_time, fps, frame_idx)
 OBJECTS_DIR       = DATA_DIR / "objects"                    # LXX_Vxxx/NNN.json
 MEDIA_INFO_DIR    = DATA_DIR / "media-info"                 # LXX_Vxxx.json (TBC)
 
-# ── Index paths ───────────────────────────────────────────────────────────────
-FAISS_INDEX_PATH  = INDEX_DIR / "faiss_clip.index"
 METADATA_PATH     = _env_path("AIC_METADATA_PATH", INDEX_DIR / "metadata.parquet")
 OBJECTS_PATH      = INDEX_DIR / "objects.parquet"
 MEDIA_INFO_PATH   = INDEX_DIR / "media_info.json"
 
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
-# Shot Segmentation Constants
-SHOT_MIN_LENGTH = 10            # Minimum frames for a valid shot
-OPTICAL_FLOW_THRESHOLD = 5.0    # Threshold for global motion filter to suppress shaky cuts
+# ── Model Configuration (SigLIP-SO400M default, switchable via AIC_MODEL_TYPE) ──
+MODEL_TYPE = os.getenv("AIC_MODEL_TYPE", "siglip").lower()
 
-# Embedding Models Config
-EMBEDDING_BATCH_SIZE = 32
-
-# ── CLIP model (MUST match the model used to create the .npy features) ────────
-# OpenCLIP's ``openai`` checkpoint was trained with QuickGELU.  The plain
-# ViT-B-32 architecture defaults to GELU and emits a mismatch warning; use the
-# architecture alias that preserves the checkpoint's embedding space.
-CLIP_MODEL_NAME = "ViT-B-32-quickgelu"
-CLIP_PRETRAINED = "openai"
-CLIP_DIM = 512
+if MODEL_TYPE == "siglip":
+    CLIP_MODEL_NAME = "ViT-SO400M-14-SigLIP"
+    CLIP_PRETRAINED = "webli"
+    CLIP_DIM = 1152
+    CLIP_FEATURES_DIR = DATA_DIR / "siglip-features-so400m"
+    FAISS_INDEX_PATH  = INDEX_DIR / "faiss_siglip.index"
+else:
+    CLIP_MODEL_NAME = "ViT-B-32-quickgelu"
+    CLIP_PRETRAINED = "openai"
+    CLIP_DIM = 512
+    CLIP_FEATURES_DIR = DATA_DIR / "clip-features-32"
+    FAISS_INDEX_PATH  = INDEX_DIR / "faiss_clip.index"
 
 # The two production Zilliz collections were generated with this exact
 # OpenCLIP model/checkpoint pair. A query encoded with the legacy ViT-B/32
@@ -53,6 +51,9 @@ CLIP_DIM = 512
 ZILLIZ_CLIP_MODEL_NAME = os.getenv("AIC_ZILLIZ_MODEL", "MobileCLIP-S2")
 ZILLIZ_CLIP_PRETRAINED = os.getenv("AIC_ZILLIZ_PRETRAINED", "datacompdr")
 ZILLIZ_CLIP_DIM = 512
+
+ENABLE_LLM_EXPANSION = os.getenv("AIC_LLM_EXPANSION", "true").lower() == "true"
+LLM_MODEL_ID = os.getenv("AIC_LLM_MODEL", "Qwen/Qwen2.5-3B-Instruct")
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
 DEFAULT_TOP_K = 100

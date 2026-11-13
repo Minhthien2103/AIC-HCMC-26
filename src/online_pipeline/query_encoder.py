@@ -67,7 +67,7 @@ class QueryEncoder():
         self._require_model()
         values = [str(query) for query in queries]
         if not values:
-            return np.empty((0, 512), dtype=np.float32)
+            return np.empty((0, 1152), dtype=np.float32)
 
         tokens = self.tokenizer(values).to(self.device)
         with torch.inference_mode():

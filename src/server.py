@@ -21,7 +21,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import polars as pl
@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src import config
 from src.online_pipeline.object_filter import ObjectFilter
 from src.online_pipeline.query_encoder import QueryEncoder
+from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.retrieval import RetrievalEngine
 from src.tasks.kis_t import KIStask
 from src.tasks.trake import TrakeTask
@@ -105,19 +106,31 @@ class SearchService:
             metadata_path=config.METADATA_PATH
         )
 
-        logger.info(f"Loading Object Filter ({config.OBJECTS_PATH})...")
-        self.object_filter = ObjectFilter(object_path=config.OBJECTS_PATH)
-
-        logger.info("Initializing KIStask and TrakeTask...")
+        logger.info("Initializing KIStask and TrakeTask (Object filter disabled - full CLIP semantic search)...")
+        self.object_filter = None
         self.kis_task = KIStask(
             encoder=self.encoder,
             retriever=self.retriever,
-            object_filter=self.object_filter
+            object_filter=None
         )
         self.trake_task = TrakeTask(
             encoder=self.encoder,
             retriever=self.retriever
         )
+
+        # Initialize Local LLM Query Expander (Qwen2.5-3B in 4-bit)
+        if getattr(config, "ENABLE_LLM_EXPANSION", True):
+            try:
+                self.expander = QueryExpander(
+                    model_id=getattr(config, "LLM_MODEL_ID", "Qwen/Qwen2.5-3B-Instruct"),
+                    device=self.device,
+                    load_in_4bit=True
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize QueryExpander: {e}")
+                self.expander = None
+        else:
+            self.expander = None
 
         # Cache of latest results for pagination
         self.last_results: List[Dict[str, Any]] = []
@@ -155,17 +168,46 @@ class SearchService:
         return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
     def _normalize_query_language(self, text: str) -> str:
-        """Transparently translate Vietnamese query to English for OpenAI CLIP embedding."""
+        """Transparently translate Vietnamese query to English for SigLIP embedding."""
         if not text or not text.strip():
             return ""
-        if any(ord(c) > 127 for c in text):
-            try:
-                translated = translate_vi_to_en(text)
-                if translated and translated.strip():
-                    return translated.strip()
-            except Exception as e:
-                logger.warning(f"Translation fallback for '{text}': {e}")
+        try:
+            translated = translate_vi_to_en(text)
+            if translated and translated.strip():
+                return translated.strip()
+        except Exception as e:
+            logger.warning(f"Translation fallback for '{text}': {e}")
         return text.strip()
+
+    def encode_and_expand_query(self, query: str) -> Tuple[np.ndarray, List[str]]:
+        """Expand query with local LLM (Qwen2.5-3B) and return blended embedding + query variants."""
+        clean_q = query.strip()
+        if not clean_q:
+            return np.empty((1, config.CLIP_DIM), dtype=np.float32), []
+
+        variations = []
+        if self.expander is not None:
+            try:
+                variations = self.expander.expand(clean_q)
+            except Exception as e:
+                logger.warning(f"Query expansion failed for '{clean_q}': {e}")
+
+        if not variations:
+            trans = self._normalize_query_language(clean_q)
+            variations = [trans] if trans else [clean_q]
+
+        vecs = self.encoder.encode_text_batch(variations)
+        if len(vecs) == 1:
+            query_vec = vecs[0].reshape(1, -1)
+        else:
+            # Weighted blending: prioritize the primary detailed description
+            weights = np.array([0.5, 0.25, 0.25][:len(vecs)], dtype=np.float32).reshape(-1, 1)
+            weights = weights / weights.sum()
+            blended = np.sum(vecs * weights, axis=0)
+            norm = np.linalg.norm(blended)
+            query_vec = (blended / (norm + 1e-8)).astype(np.float32).reshape(1, -1)
+
+        return query_vec, variations
 
     def process_temporal_query(
         self,
@@ -175,15 +217,13 @@ class SearchService:
     ) -> List[Dict[str, Any]]:
         """Execute single or sequential temporal search with proximity boosting."""
         if not second_query.strip():
-            # Standard single query via KIStask (auto-translates internally)
-            candidates = self.kis_task.execute(first_query, top_k=top_k)
+            q1_vec, _ = self.encode_and_expand_query(first_query)
+            candidates = self.retriever.search(q1_vec, top_k=top_k)
             return self.format_results(candidates, limit=top_k)
 
-        # Temporal Query: normalize language and encode both events
-        q1_en = self._normalize_query_language(first_query)
-        q2_en = self._normalize_query_language(second_query)
-        v1 = self.encoder.encode_text(q1_en)
-        v2 = self.encoder.encode_text(q2_en)
+        # Temporal Query: expand and encode both events
+        v1, _ = self.encode_and_expand_query(first_query)
+        v2, _ = self.encode_and_expand_query(second_query)
 
         r1 = self.retriever.search(v1, top_k=max(top_k * 2, 2000))
         r2 = self.retriever.search(v2, top_k=max(top_k * 2, 2000))
@@ -232,7 +272,8 @@ class SearchService:
             return []
 
         if len(clean_queries) == 1:
-            candidates = self.kis_task.execute(clean_queries[0], top_k=top_k)
+            q_vec, _ = self.encode_and_expand_query(clean_queries[0])
+            candidates = self.retriever.search(q_vec, top_k=top_k)
             return self.format_results(candidates, limit=top_k)
 
         if len(clean_queries) == 2:
@@ -241,9 +282,8 @@ class SearchService:
         # For N >= 3 events (TRAKE chained temporal matching)
         event_results = []
         for q in clean_queries:
-            q_en = self._normalize_query_language(q)
-            vec = self.encoder.encode_text(q_en)
-            res = self.retriever.search(vec, top_k=max(top_k * 2, 2000))
+            q_vec, _ = self.encode_and_expand_query(q)
+            res = self.retriever.search(q_vec, top_k=max(top_k * 2, 2000))
             event_results.append(res)
 
         # Group subsequent events by video_id
@@ -314,7 +354,8 @@ class SearchService:
         """Multi-modal search blending image vector and text vector."""
         vecs = []
         if text and text.strip():
-            vecs.append(self.encoder.encode_text(text.strip()))
+            t_vec, _ = self.encode_and_expand_query(text.strip())
+            vecs.append(t_vec[0])
 
         if image_b64:
             pil_img = self.decode_base64_image(image_b64)
@@ -437,11 +478,13 @@ def create_app() -> FastAPI:
             results = service.process_multi_event_query(queries)
             service.last_results = results
 
+            expanded_info = [service.expander.cache.get(q.strip(), []) for q in queries] if service.expander else []
             return {
                 "kq": results,
                 "fquery": queries[0] if len(queries) > 0 else "",
                 "nquery": queries[1] if len(queries) > 1 else "",
                 "queries": queries,
+                "expanded": expanded_info,
                 "total_results": len(results)
             }
         except Exception as e:
@@ -584,7 +627,7 @@ def create_app() -> FastAPI:
 
                 # Execute search
                 candidates = service.kis_task.execute(query_text or "scene", top_k=2000)
-                if required_labels:
+                if required_labels and service.object_filter:
                     candidates = service.object_filter.matching_candidates(candidates, required_labels)
 
                 results = service.format_results(candidates, limit=1000)

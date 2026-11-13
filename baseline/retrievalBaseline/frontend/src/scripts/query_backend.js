@@ -4,7 +4,7 @@
 function handleEnterKeyPress(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    performSearchFromTextareas();
+    performSearchFromInputs();
   }
 }
 
@@ -81,9 +81,47 @@ document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]').forEach(t
   textarea.addEventListener('keydown', handleEnterKeyPress);
 });
 
-// Perform search from all active text areas
-async function performSearchFromTextareas() {
+// Perform search from active inputs: automatically detects Text (KIS-T, KIS-QA, TRAKE) or Image (KIS-V)
+async function performSearchFromInputs() {
   toggleLoadingIndicator(true);
+
+  // 1. Check if Scene 1 is in Image Mode (KIS-V Visual Search)
+  const scene1 = document.getElementById('search-scene-1');
+  const imageDropArea = scene1 ? scene1.querySelector('.image-drop-area') : null;
+  const isImageTab = imageDropArea && imageDropArea.style.display !== 'none';
+  const imgElement = imageDropArea ? imageDropArea.querySelector('img') : null;
+
+  if (isImageTab && imgElement && imgElement.src) {
+    try {
+      console.log("[Search] Performing Visual Search (KIS-V)...");
+      const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || "http://localhost:8006";
+      let imageB64 = imgElement.src;
+      if (imageB64.includes(',')) {
+        imageB64 = imageB64.split(',')[1];
+      }
+
+      const textQueryArea = scene1.querySelector('textarea[name="Text_Query"]');
+      const textQuery = textQueryArea ? textQueryArea.value.trim() : "";
+
+      const response = await fetch(`${backendBase}/mixed_query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: imageB64, text: textQuery })
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const resJson = await response.json();
+      data = resJson;
+      updateUIWithSearchResults(resJson.kq);
+    } catch (err) {
+      console.error("[Visual Search Error]", err);
+    } finally {
+      toggleLoadingIndicator(false);
+    }
+    return;
+  }
+
+  // 2. Text Search (KIS-T, KIS-QA, TRAKE)
   const textareas = document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]');
   const queries = [];
   textareas.forEach(ta => {
@@ -99,9 +137,12 @@ async function performSearchFromTextareas() {
   performSearchMulti(queries);
 }
 
+window.performSearchFromInputs = performSearchFromInputs;
+window.performSearchFromTextareas = performSearchFromInputs;
+
 document.getElementById("search-button").addEventListener("click", function(event) {
   event.preventDefault();
-  performSearchFromTextareas();
+  performSearchFromInputs();
 });
 
 

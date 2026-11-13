@@ -31,12 +31,14 @@ document.addEventListener('DOMContentLoaded', function() {
 let activeTask = 'kis';
 let vqaInputs = {};
 
-// Toggles between KIS, TRAKE, and VQA tasks, updating the UI
+// Toggles between KIS-T, KIS-V, KIS-QA, and TRAKE tasks, updating the UI
 function toggleTask(task) {
   activeTask = task;
   const kisButton = document.getElementById('kis');
-  const trakeButton = document.getElementById('trake');
+  const kisVButton = document.getElementById('kis-v');
+  const kisQAButton = document.getElementById('kis-qa');
   const vqaButton = document.getElementById('vqa');
+  const trakeButton = document.getElementById('trake');
   const exportImages = document.getElementById('export-images');
   const globalTaskSelect = document.getElementById('global-task-select');
 
@@ -44,10 +46,11 @@ function toggleTask(task) {
     globalTaskSelect.value = task;
   }
 
-  [kisButton, trakeButton, vqaButton].forEach(btn => {
+  [kisButton, kisVButton, kisQAButton, vqaButton, trakeButton].forEach(btn => {
     if (btn) btn.classList.remove('active');
   });
 
+  const scene1 = document.getElementById('search-scene-1');
   const scene1Title = document.getElementById('scene-1-title');
   const scene2Title = document.getElementById('scene-2-title');
   const textQuery1 = document.getElementById('Text-Query-First');
@@ -55,28 +58,46 @@ function toggleTask(task) {
   if (task === 'kis') {
     if (kisButton) kisButton.classList.add('active');
     if (exportImages) exportImages.classList.remove('vqa-mode');
-    if (scene1Title) scene1Title.textContent = "Mô tả Cảnh";
+    if (scene1Title) scene1Title.textContent = "Mô tả Cảnh (KIS-T)";
     if (scene2Title) scene2Title.textContent = "Mô tả phụ (Tuỳ chọn)";
-    if (textQuery1) textQuery1.placeholder = "Nhập mô tả cảnh KIS (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)...";
+    if (textQuery1) textQuery1.placeholder = "Nhập mô tả cảnh KIS-T (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)...";
+    if (scene1) {
+      const textBtn = scene1.querySelector('.text-button');
+      if (textBtn) textBtn.click();
+    }
+  } else if (task === 'kis-v') {
+    if (kisVButton) kisVButton.classList.add('active');
+    if (exportImages) exportImages.classList.remove('vqa-mode');
+    if (scene1Title) scene1Title.textContent = "Ảnh Mẫu (KIS-V)";
+    if (scene2Title) scene2Title.textContent = "Mô tả phụ (Tuỳ chọn)";
+    if (scene1) {
+      const imgBtn = scene1.querySelector('.image-button');
+      if (imgBtn) imgBtn.click();
+    }
+  } else if (task === 'kis-qa' || task === 'vqa') {
+    if (kisQAButton) kisQAButton.classList.add('active');
+    if (vqaButton) vqaButton.classList.add('active');
+    if (exportImages) exportImages.classList.add('vqa-mode');
+    if (scene1Title) scene1Title.textContent = "Câu hỏi KIS-QA";
+    if (scene2Title) scene2Title.textContent = "Ngữ cảnh phụ (Tuỳ chọn)";
+    if (textQuery1) textQuery1.placeholder = "Nhập câu hỏi Q&A (VD: Người phụ nữ trong video đang cầm vật gì?)...";
+    if (scene1) {
+      const textBtn = scene1.querySelector('.text-button');
+      if (textBtn) textBtn.click();
+    }
   } else if (task === 'trake') {
     if (trakeButton) trakeButton.classList.add('active');
     if (exportImages) exportImages.classList.remove('vqa-mode');
-    if (scene1Title) scene1Title.textContent = "Sự kiện 1";
-    if (scene2Title) scene2Title.textContent = "Sự kiện 2";
+    if (scene1Title) scene1Title.textContent = "Sự kiện 1 (TRAKE)";
+    if (scene2Title) scene2Title.textContent = "Sự kiện 2 (TRAKE)";
     if (textQuery1) textQuery1.placeholder = "Nhập Sự kiện 1 của TRAKE (VD: xe hơi rẽ trái vào ngõ)...";
-  } else if (task === 'vqa') {
-    if (vqaButton) vqaButton.classList.add('active');
-    if (exportImages) exportImages.classList.add('vqa-mode');
-    if (scene1Title) scene1Title.textContent = "Câu hỏi VQA";
-    if (scene2Title) scene2Title.textContent = "Ngữ cảnh phụ (Tuỳ chọn)";
-    if (textQuery1) textQuery1.placeholder = "Nhập câu hỏi VQA (VD: Người đàn ông trong video đang cầm gì trên tay?)...";
   }
 
   // Update fullscreen mode based on active task
   const kisFullscreenButton = document.getElementById('kis-fullscreen');
   const vqaFullscreenButton = document.getElementById('vqa-fullscreen');
 
-  if (task === 'kis' || task === 'trake') {
+  if (task === 'kis' || task === 'kis-v' || task === 'trake') {
     if (kisFullscreenButton) kisFullscreenButton.classList.add('active');
     if (vqaFullscreenButton) vqaFullscreenButton.classList.remove('active');
   } else {
@@ -116,12 +137,14 @@ function updateExportArea() {
       <img src="${img.src}" class="export-image" title="Frame ID: ${img.frameId}">
       <button class="delete-button" onclick="deleteExportImage(${index})">×</button>
       <div class="infor">${img.frameInfo}</div>
-      ${activeTask === 'vqa' ? `
+      ${(activeTask === 'vqa' || activeTask === 'kis-qa') ? `
         <input 
           type="text" 
           class="vqa-input" 
           value="${vqaInputs[img.frameId] || ''}" 
-          placeholder="VQA Input" 
+          placeholder="Nhập câu trả lời Q&A..." 
+          oninput="vqaInputs['${img.frameId}'] = this.value;"
+          style="width: 100%; box-sizing: border-box; margin-top: 4px; padding: 4px;"
         >
       ` : ''}
     </div>
@@ -292,6 +315,10 @@ document.addEventListener('DOMContentLoaded', function() {
   exportArea.addEventListener('drop', drop);
   resetExportButton.addEventListener('click', resetExportArea);
   if (kisButton) kisButton.addEventListener('click', () => toggleTask('kis'));
+  const kisVButton = document.getElementById('kis-v');
+  if (kisVButton) kisVButton.addEventListener('click', () => toggleTask('kis-v'));
+  const kisQAButton = document.getElementById('kis-qa');
+  if (kisQAButton) kisQAButton.addEventListener('click', () => toggleTask('kis-qa'));
   if (vqaButton) vqaButton.addEventListener('click', () => toggleTask('vqa'));
   const trakeButton = document.getElementById('trake');
   if (trakeButton) trakeButton.addEventListener('click', () => toggleTask('trake'));

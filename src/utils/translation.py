@@ -12,6 +12,9 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+import urllib.parse
+import urllib.request
+
 try:
     from deep_translator import GoogleTranslator
 except ImportError:  # pragma: no cover - depends on the selected environment
@@ -23,13 +26,47 @@ class _Translator(Protocol):
 
 
 class _GoogleFallback:
+    def __init__(self):
+        self._mem_cache = {}
+
+    def _gtx_translate(self, text: str) -> str:
+        encoded = urllib.parse.quote(text)
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=vi&tl=en&dt=t&q={encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            return "".join([segment[0] for segment in data[0] if segment and segment[0]]).strip()
+
     def translate(self, text: str) -> str:
-        if GoogleTranslator is None:
-            return text
+        if not text or not text.strip():
+            return ""
+        clean_text = text.strip()
+        if clean_text in self._mem_cache:
+            return self._mem_cache[clean_text]
+
+        # 1. Primary: Direct Google GTX API (fast, reliable, no rate-limit)
         try:
-            return GoogleTranslator(source="vi", target="en").translate(text)
+            translated = self._gtx_translate(clean_text)
+            if translated:
+                self._mem_cache[clean_text] = translated
+                return translated
         except Exception:
-            return text
+            pass
+
+        # 2. Secondary fallback: deep_translator
+        if GoogleTranslator is not None:
+            try:
+                translated = GoogleTranslator(source="vi", target="en").translate(clean_text)
+                if translated and translated.strip():
+                    self._mem_cache[clean_text] = translated.strip()
+                    return translated.strip()
+            except Exception:
+                pass
+
+        return clean_text
 
 
 class MBartCachedTranslator:

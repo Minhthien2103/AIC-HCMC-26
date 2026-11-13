@@ -407,9 +407,12 @@ function setupModeButtons(scene) {
 //------------------------------------------------------------------------//
 // Upload image
 
-// Set up image upload functionality
+// Set up image & video upload functionality
 function setupImageUpload(dropZone, fileInput, previewContainer) {
     const dropInstruction = dropZone.querySelector('.drop-instruction');
+    if (fileInput) {
+        fileInput.setAttribute('accept', 'image/*,video/*');
+    }
     
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -424,7 +427,15 @@ function setupImageUpload(dropZone, fileInput, previewContainer) {
         e.preventDefault();
         dropZone.classList.remove('dragover');
         const file = e.dataTransfer.files[0];
-        handleImageUpload(file, previewContainer, dropInstruction);
+        if (!file) return;
+
+        if (file.type.startsWith('video/')) {
+            extractFrameFromVideo(file, (imageBlob) => {
+                handleImageUpload(imageBlob, previewContainer, dropInstruction);
+            });
+        } else {
+            handleImageUpload(file, previewContainer, dropInstruction);
+        }
     });
 
     dropZone.addEventListener('click', () => {
@@ -433,8 +444,49 @@ function setupImageUpload(dropZone, fileInput, previewContainer) {
 
     fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
-        handleImageUpload(file, previewContainer, dropInstruction);
+        if (!file) return;
+
+        if (file.type.startsWith('video/')) {
+            extractFrameFromVideo(file, (imageBlob) => {
+                handleImageUpload(imageBlob, previewContainer, dropInstruction);
+            });
+        } else {
+            handleImageUpload(file, previewContainer, dropInstruction);
+        }
     });
+}
+
+// Extract a representative frame from an uploaded video file (e.g. 5s clip)
+function extractFrameFromVideo(file, callback) {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.src = URL.createObjectURL(file);
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = () => {
+        const targetTime = Math.min(1.0, video.duration / 2);
+        video.currentTime = targetTime;
+    };
+
+    video.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+            URL.revokeObjectURL(video.src);
+            if (blob) {
+                callback(blob);
+            }
+        }, 'image/jpeg', 0.92);
+    };
+
+    video.onerror = (err) => {
+        console.error("[Video Extract Error]", err);
+        alert("Không thể đọc frame từ file video tải lên!");
+    };
 }
 
 
@@ -465,6 +517,13 @@ function handleImageUpload(file, previewContainer, dropInstruction) {
             previewContainer.innerHTML = '';
             previewContainer.appendChild(imgContainer);
             dropInstruction.style.display = 'none';
+
+            // Auto-trigger search for KIS-V when image is dropped or uploaded
+            setTimeout(() => {
+                if (typeof performSearchFromInputs === 'function') {
+                    performSearchFromInputs();
+                }
+            }, 100);
         };
         reader.readAsDataURL(file);
     }
@@ -522,8 +581,8 @@ function addNewSearchScene() {
             <div class="query-content-area">
                 <textarea name="Text_Query" id="Text-Query-${newSceneNumber}" rows="3" placeholder="Nhập mô tả sự kiện ${newSceneNumber}..."></textarea>
                 <div class="image-drop-area" style="display: none;">
-                    <p class="drop-instruction">Kéo thả ảnh vào đây hoặc click để chọn ảnh</p>
-                    <input type="file" accept="image/*" style="display: none;" id="Image-Query-${newSceneNumber}">
+                    <p class="drop-instruction">Kéo thả ảnh / video 5s hoặc bấm Ctrl+V để dán ảnh chụp màn hình</p>
+                    <input type="file" accept="image/*,video/*" style="display: none;" id="Image-Query-${newSceneNumber}">
                     <div class="preview-upload-container"></div>
                 </div>
             </div>
@@ -633,18 +692,54 @@ document.addEventListener('DOMContentLoaded', function() {
     if (taskSelect) {
         taskSelect.addEventListener('change', function() {
             renumberScenes();
-            const firstSceneTa = document.querySelector('#search-scene-1 textarea[name="Text_Query"]');
+            const scene1 = document.getElementById('search-scene-1');
+            const firstSceneTa = scene1 ? scene1.querySelector('textarea[name="Text_Query"]') : null;
             if (firstSceneTa) {
                 if (this.value === 'kis') {
                     firstSceneTa.placeholder = 'Nhập mô tả cảnh KIS (VD: người phụ nữ mặc áo xanh, xe cứu hỏa)...';
+                    if (scene1) switchTab(scene1, 'text');
+                } else if (this.value === 'kis-v') {
+                    if (scene1) switchTab(scene1, 'image');
+                } else if (this.value === 'kis-qa' || this.value === 'vqa') {
+                    firstSceneTa.placeholder = 'Nhập câu hỏi KIS-QA (VD: Biển số xe là gì? Người đàn ông cầm gì?...)...';
+                    if (scene1) switchTab(scene1, 'text');
                 } else if (this.value === 'trake') {
                     firstSceneTa.placeholder = 'Nhập mô tả Sự kiện 1 (Sự kiện diễn ra đầu tiên trong chuỗi)...';
-                } else if (this.value === 'vqa') {
-                    firstSceneTa.placeholder = 'Nhập câu hỏi VQA (VD: Có bao nhiêu chiếc xe hơi màu đỏ?...)...';
+                    if (scene1) switchTab(scene1, 'text');
                 }
             }
         });
     }
+
+    // Global Clipboard Paste (Ctrl+V) listener for quick screenshot search (V-KIS)
+    document.addEventListener('paste', function(e) {
+        if (!e.clipboardData || !e.clipboardData.items) return;
+        const items = e.clipboardData.items;
+        let imageItem = null;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.startsWith('image/')) {
+                imageItem = items[i];
+                break;
+            }
+        }
+
+        if (imageItem) {
+            e.preventDefault();
+            const blob = imageItem.getAsFile();
+            if (!blob) return;
+
+            const scene1 = document.getElementById('search-scene-1') || document.querySelector('.Search_Scene');
+            if (scene1) {
+                switchTab(scene1, 'image');
+                const imageDropArea = scene1.querySelector('.image-drop-area');
+                if (imageDropArea) {
+                    const previewContainer = imageDropArea.querySelector('.preview-upload-container');
+                    const dropInstruction = imageDropArea.querySelector('.drop-instruction');
+                    handleImageUpload(blob, previewContainer, dropInstruction);
+                }
+            }
+        }
+    });
 });
 
 function removeAddedScenes() {

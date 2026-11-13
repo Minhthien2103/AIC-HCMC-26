@@ -232,7 +232,9 @@ document.addEventListener('DOMContentLoaded', function() {
     { key: 'Alt + A', description: 'Toggle export area' },
     { key: 'Alt + S', description: 'Reset export area' },
     { key: 'Alt + D', description: 'Toggle object list' },
-    { key: 'Alt + X', description: 'Enable preview mode' }
+    { key: 'Alt + X', description: 'Enable preview mode' },
+    { key: 'Ctrl + V', description: 'Paste screenshot from clipboard for Visual KIS (V-KIS)' },
+    { key: 'Ctrl + S', description: 'Submit answers to DRES server' }
   ];
 
   function populateShortcutList() {
