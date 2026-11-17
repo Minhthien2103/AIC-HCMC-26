@@ -41,15 +41,21 @@ function resolveResultImageUrl(result) {
   return `${mediaBase}/keyframes/${video}/${frame}${ext}`;
 }
 
+function escapeResultHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
 function createImageDiv(result, index) {
   const frameInfo = `${result.entity.video}-${parseFloat(result.entity.time.toFixed(2))}`;
   const imgUrl = resolveResultImageUrl(result);
 
   const ocrBadge = result.entity.ocr_match 
-    ? `<div class="ocr-match-badge" style="position:absolute; top:4px; left:4px; background:#ea580c; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Khớp OCR: ${result.entity.ocr_match}">🔤 ${result.entity.ocr_match}</div>` 
+    ? `<div class="ocr-match-badge" style="position:absolute; top:4px; left:4px; background:#ea580c; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Khớp OCR: ${escapeResultHtml(result.entity.ocr_match)}">🔤 ${escapeResultHtml(result.entity.ocr_match)}</div>`
     : '';
   const vlmBadge = result.entity.vlm_score !== undefined 
-    ? `<div class="vlm-score-badge" style="position:absolute; top:4px; right:4px; background:#4f46e5; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Điểm VLM AI: ${result.entity.vlm_score}">🤖 ${(result.entity.vlm_score * 10).toFixed(0)}/10</div>` 
+    ? `<div class="vlm-score-badge" style="position:absolute; top:4px; right:4px; background:#4f46e5; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Điểm VLM AI: ${result.entity.vlm_score}">🤖 ${(result.entity.vlm_score * 10).toFixed(0)}/10</div>`
     : '';
 
   const div = document.createElement('div');
@@ -89,39 +95,15 @@ function createImageDiv(result, index) {
 function updateRightPanel_list(results) {
   const listPhoto = document.getElementById("list-photo");
   const fragment = document.createDocumentFragment();
-  const existingDivs = Array.from(listPhoto.children);
-
+  listPhoto.querySelectorAll('img').forEach(img => imageObserver.unobserve(img));
+  listPhoto.replaceChildren();
   const updatedDivs = results.map((result, index) => {
-      let div;
-      if (index < existingDivs.length) {
-          div = existingDivs[index];
-          div.style.display = 'block';
-      } else {
-          div = createImageDiv(result, index + 1);
-          fragment.appendChild(div);
-      }
-
-      const img = div.querySelector('img');
-      const infor = div.querySelector('.infor');
-      img.id = index + 1;
-
-      const imgUrl = resolveResultImageUrl(result);
-      img.dataset.src = imgUrl;
-
-      img.src = imgUrl;
-      infor.textContent = `${result.entity.video}-${parseFloat(result.entity.time.toFixed(2))}`;
-
-      imageObserver.observe(img);
+      const div = createImageDiv(result, index + 1);
+      fragment.appendChild(div);
+      imageObserver.observe(div.querySelector('img'));
       return div;
   });
-
-  // Remove excess divs
-  existingDivs.slice(results.length).forEach(div => div.remove());
-
-  // Append new divs if any
-  if (fragment.children.length > 0) {
-      listPhoto.appendChild(fragment);
-  }
+  listPhoto.appendChild(fragment);
 
   listPhoto.scrollTop = 0;
 
@@ -193,6 +175,7 @@ function updateRightPanel_rows(results) {
 
 // Update both panels
 function updateUIWithSearchResults(results) {
+  window.currentSearchResults = results;
   updateRightPanel_list(results);
   updateRightPanel_rows(results);
   updateObjectList(results);

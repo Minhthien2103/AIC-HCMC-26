@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import config
+from src.online_pipeline.score_fusion import weighted_rrf, normalized_score
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.retrieval import RetrievalEngine
@@ -80,6 +81,7 @@ class SimilaritySearchRequest(BaseModel):
 class MixedQueryRequest(BaseModel):
     image: Optional[str] = None  # Base64 encoded image
     text: Optional[str] = ""
+    ocr_text: str = ""
 
 
 class DoubleImageQueryRequest(BaseModel):
@@ -205,7 +207,7 @@ class SearchService:
             v_id = str(cand.get("video_id") or cand.get("video", ""))
             k_name = str(cand.get("keyframe_name") or cand.get("frame_id", ""))
             pts_time = float(cand.get("pts_time", 0.0))
-            score = float(cand.get("score", 0.0))
+            score = normalized_score(cand)
             f_idx = int(cand.get("faiss_idx", idx))
 
             entity_payload: Dict[str, Any] = {
@@ -225,6 +227,7 @@ class SearchService:
                 "id": f_idx,
                 "distance": score,
                 "score": score,
+                "score_space": "unit",
                 "entity": entity_payload
             })
         return formatted
@@ -248,8 +251,8 @@ class SearchService:
             logger.warning(f"Translation fallback for '{text}': {e}")
         return text.strip()
 
-    def encode_and_expand_query(self, query: str) -> Tuple[np.ndarray, List[str]]:
-        """Expand query with local LLM (Qwen2.5-3B) and return blended embedding + query variants."""
+    def encode_query_variants(self, query: str) -> Tuple[np.ndarray, List[str]]:
+        """Encode the faithful primary translation and its supporting variants in one batch."""
         clean_q = query.strip()
         if not clean_q:
             return np.empty((1, config.CLIP_DIM), dtype=np.float32), []
@@ -265,41 +268,51 @@ class SearchService:
             trans = self._normalize_query_language(clean_q)
             variations = [trans] if trans else [clean_q]
 
-        vecs = self.encoder.encode_text_batch(variations)
-        if len(vecs) == 1:
-            query_vec = vecs[0].reshape(1, -1)
-        else:
-            # Weighted blending: prioritize the primary detailed description using config.EXPANSION_WEIGHTS
-            raw_weights = config.EXPANSION_WEIGHTS[:len(vecs)]
-            weights = np.array(raw_weights, dtype=np.float32).reshape(-1, 1)
-            weights = weights / weights.sum()
-            blended = np.sum(vecs * weights, axis=0)
-            norm = np.linalg.norm(blended)
-            query_vec = (blended / (norm + 1e-8)).astype(np.float32).reshape(1, -1)
+        # Preserve branch positions so configured weights retain their meaning.
+        variations = [v.strip() for v in variations if v.strip()][:3]
+        return self.encoder.encode_text_batch(variations), variations
 
-        return query_vec, variations
+    def encode_and_expand_query(self, query: str) -> Tuple[np.ndarray, List[str]]:
+        """Compatibility for image blending: use only the faithful primary vector."""
+        vecs, variations = self.encode_query_variants(query)
+        return vecs[:1], variations
 
-    def apply_ocr_boost(self, candidates: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    def retrieve_text(self, query: str, top_k: int = 1000) -> List[Dict[str, Any]]:
+        vecs, variations = self.encode_query_variants(query)
+        if not variations:
+            return []
+        rankings = self.retriever.search_batch(vecs, top_k=top_k)
+        return weighted_rrf(rankings, config.EXPANSION_WEIGHTS,
+                            config.RRF_RANK_CONSTANT)[:top_k]
+
+    def apply_ocr_boost(self, candidates: List[Dict[str, Any]], query: str, ocr_text: str = "") -> List[Dict[str, Any]]:
         """Boost candidate scores if deterministic OCR entities match."""
         if not getattr(config, "ENABLE_OCR_SEARCH", True) or self.text_search is None:
             return candidates
 
-        ocr_kws = self.text_search.extract_deterministic_keywords(query)
+        manual_text = ocr_text.strip()
+        if manual_text:
+            # Commas separate alternatives; keep phrases intact and ignore empty/duplicate entries.
+            ocr_kws = list(dict.fromkeys(
+                part.strip().casefold() for part in manual_text.split(",") if part.strip()
+            ))
+        else:
+            ocr_kws = self.text_search.extract_deterministic_keywords(query)
         if not ocr_kws:
             return candidates
 
         ocr_matches = self.text_search.search_candidates(ocr_kws, boost_score=config.OCR_BOOST_WEIGHT)
-        if not ocr_matches:
-            return candidates
-
         boost_count = 0
         for c in candidates:
+            base_score = normalized_score(c)
+            c["score"] = base_score / (1.0 + max(0.0, config.OCR_BOOST_WEIGHT))
+            c["score_space"] = "unit"
             v_id = c.get("video_id", "")
             k_name = str(c.get("keyframe_name") or c.get("frame_id", ""))
             key = (v_id, k_name)
             if key in ocr_matches:
                 match_info = ocr_matches[key]
-                c["score"] = float(c.get("score", 0.0)) + float(match_info["boost"])
+                c["score"] = (base_score + max(0.0, config.OCR_BOOST_WEIGHT)) / (1.0 + max(0.0, config.OCR_BOOST_WEIGHT))
                 c["ocr_match"] = match_info["matched_keyword"]
                 boost_count += 1
 
@@ -313,21 +326,18 @@ class SearchService:
         self,
         first_query: str,
         second_query: str = "",
-        top_k: int = 1000
+        top_k: int = 1000,
+        ocr_text: str = ""
     ) -> List[Dict[str, Any]]:
         """Execute single or sequential temporal search with proximity boosting."""
         if not second_query.strip():
-            q1_vec, _ = self.encode_and_expand_query(first_query)
-            candidates = self.retriever.search(q1_vec, top_k=top_k)
-            candidates = self.apply_ocr_boost(candidates, first_query)
+            candidates = self.retrieve_text(first_query, top_k=top_k)
+            candidates = self.apply_ocr_boost(candidates, first_query, ocr_text)
             return self.format_results(candidates, limit=top_k)
 
         # Temporal Query: expand and encode both events
-        v1, _ = self.encode_and_expand_query(first_query)
-        v2, _ = self.encode_and_expand_query(second_query)
-
-        r1 = self.retriever.search(v1, top_k=max(top_k * 2, 2000))
-        r2 = self.retriever.search(v2, top_k=max(top_k * 2, 2000))
+        r1 = self.retrieve_text(first_query, top_k=max(top_k * 2, 2000))
+        r2 = self.retrieve_text(second_query, top_k=max(top_k * 2, 2000))
 
         # Group second query candidates by video_id
         r2_by_vid: Dict[str, List[Dict[str, Any]]] = {}
@@ -356,16 +366,19 @@ class SearchService:
                         if boost > max_boost:
                             max_boost = boost
 
-            item_copy["score"] = base_score + max_boost
+            item_copy["score"] = (base_score + max_boost) / 2.0
             boosted.append(item_copy)
 
         boosted.sort(key=lambda x: -float(x.get("score", 0.0)))
+        if ocr_text.strip():
+            boosted = self.apply_ocr_boost(boosted, "", ocr_text)
         return self.format_results(boosted, limit=top_k)
 
     def process_multi_event_query(
         self,
         queries: List[str],
-        top_k: int = 1000
+        top_k: int = 1000,
+        ocr_text: str = ""
     ) -> List[Dict[str, Any]]:
         """Execute single or sequential temporal search across arbitrary N events (TRAKE)."""
         clean_queries = [q.strip() for q in queries if q and q.strip()]
@@ -373,19 +386,17 @@ class SearchService:
             return []
 
         if len(clean_queries) == 1:
-            q_vec, _ = self.encode_and_expand_query(clean_queries[0])
-            candidates = self.retriever.search(q_vec, top_k=top_k)
-            candidates = self.apply_ocr_boost(candidates, clean_queries[0])
+            candidates = self.retrieve_text(clean_queries[0], top_k=top_k)
+            candidates = self.apply_ocr_boost(candidates, clean_queries[0], ocr_text)
             return self.format_results(candidates, limit=top_k)
 
         if len(clean_queries) == 2:
-            return self.process_temporal_query(clean_queries[0], clean_queries[1], top_k=top_k)
+            return self.process_temporal_query(clean_queries[0], clean_queries[1], top_k=top_k, ocr_text=ocr_text)
 
         # For N >= 3 events (TRAKE chained temporal matching)
         event_results = []
         for q in clean_queries:
-            q_vec, _ = self.encode_and_expand_query(q)
-            res = self.retriever.search(q_vec, top_k=max(top_k * 2, 2000))
+            res = self.retrieve_text(q, top_k=max(top_k * 2, 2000))
             event_results.append(res)
 
         # Group subsequent events by video_id
@@ -433,10 +444,12 @@ class SearchService:
                     break
 
             seq_ratio = matched_events / len(clean_queries)
-            item_copy["score"] = (base_score + total_boost) * seq_ratio
+            item_copy["score"] = (base_score + total_boost) * seq_ratio / len(clean_queries)
             boosted.append(item_copy)
 
         boosted.sort(key=lambda x: -float(x.get("score", 0.0)))
+        if ocr_text.strip():
+            boosted = self.apply_ocr_boost(boosted, "", ocr_text)
         return self.format_results(boosted, limit=top_k)
 
     def similarity_search_by_id(self, faiss_idx: int, top_k: int = 1000) -> List[Dict[str, Any]]:
@@ -452,7 +465,7 @@ class SearchService:
         results = self.retriever.search(vec, top_k=top_k)
         return self.format_results(results, limit=top_k)
 
-    def mixed_search(self, image_b64: Optional[str], text: Optional[str], top_k: int = 1000) -> List[Dict[str, Any]]:
+    def mixed_search(self, image_b64: Optional[str], text: Optional[str], top_k: int = 1000, ocr_text: str = "") -> List[Dict[str, Any]]:
         """Multi-modal search blending image vector and text vector."""
         vecs = []
         if text and text.strip():
@@ -474,6 +487,8 @@ class SearchService:
             query_vec = (blended / (norm + 1e-8)).astype(np.float32).reshape(1, -1)
 
         results = self.retriever.search(query_vec, top_k=top_k)
+        if ocr_text.strip():
+            results = self.apply_ocr_boost(results, "", ocr_text)
         return self.format_results(results, limit=top_k)
 
     def double_image_search(self, img1_b64: str, img2_b64: str, top_k: int = 1000) -> List[Dict[str, Any]]:
@@ -577,7 +592,10 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                     "total_results": 0
                 }
 
-            results = service.process_multi_event_query(queries)
+            ocr_text = data.get("ocr_text", "")
+            if not isinstance(ocr_text, str):
+                raise HTTPException(status_code=422, detail="ocr_text must be a string")
+            results = service.process_multi_event_query(queries, ocr_text=ocr_text)
 
             # Optional VLM Reranking on Top-K if requested
             if (data.get("vlm_rerank", False) or getattr(config, "ENABLE_VLM_RERANK", False)) and service.vlm_reranker is not None:
@@ -586,7 +604,11 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                         results,
                         query=queries[0],
                         top_n=config.VLM_RERANK_TOP_K,
-                        vlm_weight=config.VLM_RERANK_WEIGHT
+                        vlm_weight=config.VLM_RERANK_WEIGHT,
+                        diversity_index=service.retriever.index,
+                        diversity_pool=config.VLM_DIVERSITY_POOL,
+                        diversity_similarity=config.VLM_DIVERSITY_SIMILARITY,
+                        diversity_seconds=config.VLM_DIVERSITY_SECONDS,
                     )
 
             service.last_results = results
@@ -600,6 +622,8 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                 "expanded": expanded_info,
                 "total_results": len(results)
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in /TextQuery: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
@@ -630,13 +654,17 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                 candidates=candidates,
                 query=query,
                 top_n=top_n,
-                vlm_weight=config.VLM_RERANK_WEIGHT
+                vlm_weight=config.VLM_RERANK_WEIGHT,
+                diversity_index=service.retriever.index,
+                diversity_pool=config.VLM_DIVERSITY_POOL,
+                diversity_similarity=config.VLM_DIVERSITY_SIMILARITY,
+                diversity_seconds=config.VLM_DIVERSITY_SECONDS,
             )
             service.last_results = reranked
             return {
                 "kq": reranked,
                 "status": "success",
-                "reranked_count": min(top_n, len(candidates))
+                "reranked_count": sum(bool(c.get("vlm_selected")) for c in reranked)
             }
         except Exception as e:
             logger.error(f"Error in /rerank: {e}", exc_info=True)
@@ -667,7 +695,7 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
     @app.post("/mixed_query")
     async def mixed_query_endpoint(req: MixedQueryRequest):
         try:
-            results = service.mixed_search(req.image, req.text)
+            results = service.mixed_search(req.image, req.text, ocr_text=req.ocr_text)
             service.last_results = results
             return {"kq": results, "total_results": len(results)}
         except Exception as e:

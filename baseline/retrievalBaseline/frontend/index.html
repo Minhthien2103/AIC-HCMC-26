@@ -283,6 +283,13 @@
         </div>
 
         <div class="button-card">
+          <div style="margin-bottom: 12px;">
+            <label for="ocr-text-input">Chữ cần tìm trong ảnh (OCR, tùy chọn)</label>
+            <input type="text" id="ocr-text-input" placeholder="VD: 115, ambulance"
+              aria-describedby="ocr-text-help"
+              style="box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px;">
+            <small id="ocr-text-help" style="display: block; margin-top: 6px; color: #94a3b8;">Ngăn cách các từ/cụm chữ bằng dấu phẩy. Khớp ít nhất một cụm sẽ được cộng điểm một lần. Điền mô tả và OCR rồi nhấn Enter một lần để tìm. Để trống OCR để dùng cơ chế tự động. Với nhiều sự kiện, OCR áp dụng cho ảnh sự kiện đầu tiên.</small>
+          </div>
           <div class="button-group">
             <button type="button" id="search-button" class="main-search-btn"><i class="fa fa-search"></i> Tìm kiếm (Enter)</button>
             <button type="button" id="filter-button" class="main-filter-btn"><i class="fa fa-filter"></i> Lọc Object</button>
@@ -598,18 +605,18 @@
     <script src="src/scripts/web_socket.js?v=3"></script>
     <script src="src/websocket/multi_combined_search.js?v=3"></script>
     <script src="src/scripts/start_ui.js?v=3"></script>
-    <script src="src/scripts/update_result.js?v=3"></script>
+    <script src="src/scripts/update_result.js?v=4"></script>
     <script src="src/scripts/dice.js?v=3"></script>
     <script src="src/scripts/show_video.js?v=3"></script>
     <script src="src/scripts/show_videoframe.js?v=3"></script>
     <script src="src/scripts/export.js?v=3"></script>
     <script src="src/scripts/group_search.js?v=3"></script>
-    <script src="src/scripts/left_panel.js?v=3"></script>
+    <script src="src/scripts/left_panel.js?v=5"></script>
     <script src="src/scripts/queries_history.js?v=3"></script>
     <script src="src/scripts/object_list.js?v=3"></script>
     <script src="src/scripts/pagnition.js?v=3"></script>
     <script src="src/scripts/submit_dres.js?v=3"></script>
-    <script src="src/scripts/query_backend.js?v=3"></script>
+    <script src="src/scripts/query_backend.js?v=4"></script>
   </body>
 </html>
 

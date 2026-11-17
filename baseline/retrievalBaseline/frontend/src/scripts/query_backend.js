@@ -9,16 +9,17 @@ function handleEnterKeyPress(event) {
 }
 
 // Perform multi-event search with debounce (supports KIS & TRAKE with N events)
-const performSearchMulti = debounce(async function (queries) {
+const performSearchMulti = debounce(async function (queries, ocrText = "") {
   if (!queries || queries.length === 0) {
     toggleLoadingIndicator(false);
     return;
   }
 
-  const cacheKey = queries.join(" || ");
+  const cacheKey = JSON.stringify([queries, ocrText]);
   
   if (searchCache.has(cacheKey)) {
-    updateUIWithSearchResults(searchCache.get(cacheKey));
+    data = { kq: searchCache.get(cacheKey) };
+    updateUIWithSearchResults(data.kq);
     toggleLoadingIndicator(false);
     return;
   }
@@ -42,6 +43,7 @@ const performSearchMulti = debounce(async function (queries) {
       },
       body: JSON.stringify({
         queries: queries,
+        ocr_text: ocrText,
         First_query: queries[0] || "",
         Next_query: queries[1] || "",
       }),
@@ -84,6 +86,7 @@ document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]').forEach(t
 // Perform search from active inputs: automatically detects Text (KIS-T, KIS-QA, TRAKE) or Image (KIS-V)
 async function performSearchFromInputs() {
   toggleLoadingIndicator(true);
+  const ocrText = document.getElementById("ocr-text-input")?.value.trim() || "";
 
   // 1. Check if Scene 1 is in Image Mode (KIS-V Visual Search)
   const scene1 = document.getElementById('search-scene-1');
@@ -106,7 +109,7 @@ async function performSearchFromInputs() {
       const response = await fetch(`${backendBase}/mixed_query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: imageB64, text: textQuery })
+        body: JSON.stringify({ image: imageB64, text: textQuery, ocr_text: ocrText })
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -134,7 +137,7 @@ async function performSearchFromInputs() {
     return;
   }
 
-  performSearchMulti(queries);
+  performSearchMulti(queries, ocrText);
 }
 
 window.performSearchFromInputs = performSearchFromInputs;
@@ -191,3 +194,6 @@ async function similaritySearch(img) {
   debouncedSimilaritySearch(img);
 }
 
+
+// Enter in the optional OCR field performs the same visual search.
+document.getElementById("ocr-text-input")?.addEventListener("keydown", handleEnterKeyPress);

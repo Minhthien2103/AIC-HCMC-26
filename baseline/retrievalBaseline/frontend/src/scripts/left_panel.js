@@ -702,13 +702,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch(`${backendBase}/rerank`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: queryText, top_n: 20 })
+                    body: JSON.stringify({ query: queryText, top_n: 20, candidates: window.currentSearchResults })
                 });
-                const data = await response.json();
-                if (data && data.kq && typeof updateRightPanel_list === 'function') {
-                    updateRightPanel_list(data.kq);
+                const rerankData = await response.json();
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (rerankData && rerankData.kq && typeof updateUIWithSearchResults === 'function') {
+                    data = rerankData;
+                    updateUIWithSearchResults(rerankData.kq);
                     if (typeof showTemporaryAlert === 'function') {
-                        showTemporaryAlert(`Đã Rerank Top ${data.reranked_count || 20} frame bằng Qwen2-VL thành công!`, 'success');
+                        showTemporaryAlert(`Đã chọn ${rerankData.reranked_count ?? 0} frame để rerank bằng VLM.`, 'success');
                     }
                 }
             } catch (err) {

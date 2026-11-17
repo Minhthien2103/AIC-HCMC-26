@@ -89,31 +89,44 @@ flowchart TD
     UserQuery["User Input (Text Tiếng Việt / Ảnh / Multi-Event)"] --> QueryRouter{"Loại truy vấn?"}
     
     QueryRouter -- "Ảnh mẫu (KIS-V)" --> ImageEncoder["SigLIP Image Encoder"]
-    ImageEncoder --> FAISSSearch["FAISS Vector Search (Top-500)"]
+    ImageEncoder --> FAISSSearch["FAISS Vector Search"]
     
     QueryRouter -- "Văn bản (KIS-T, QA, TRAKE)" --> ParallelStep["Phân nhánh xử lý"]
     
-    ParallelStep --> OCRBranch["Deterministic Regex Filter (Số / Biển số / Ngoặc kép)"]
+    ParallelStep --> OCRBranch["OCR nhập tay (cách nhau dấu phẩy) hoặc Deterministic Regex"]
     OCRBranch --> OCRSearch["TextSearchEngine (indexes/ocr_text.parquet)"]
     
     ParallelStep --> SLMBranch["Qwen2.5-3B-Instruct 4-bit (Sửa lỗi Telex & Mở rộng 3 prompt)"]
-    SLMBranch --> SigLIPText["SigLIP Text Encoder (Weighted Blending)"]
-    SigLIPText --> FAISSSearch
+    SLMBranch --> QueryVariants["Dịch sát nghĩa theo ngữ cảnh / Chủ thể & Hành động / Từ khóa hình ảnh"]
+    QueryVariants --> SigLIPText["SigLIP Text Encoder (Batch 3 nhánh)"]
+    SigLIPText --> TextSearch["FAISS Batch Search (Tìm riêng từng nhánh)"]
+    TextSearch --> RRF["Weighted RRF: 0.7 / 0.2 / 0.1 → Điểm 0–1"]
+    RRF --> Temporal["Multi-Event: Kết hợp thứ tự & Khoảng cách thời gian"]
+    Temporal --> ScoreFusion
     
-    FAISSSearch --> ScoreFusion["Kết hợp Điểm & Metadata Join"]
-    OCRSearch -.->|"Khớp chữ/số: Soft Boost (+0.35)"| ScoreFusion
+    FAISSSearch --> ScoreFusion["Chuẩn hóa Điểm 0–1 & Metadata Join"]
+    OCRSearch -.->|"Soft Boost một lần, chuẩn hóa về 0–1"| ScoreFusion
     
-    ScoreFusion --> CandidateList["Danh sách Top-100 Khung hình tiềm năng"]
+    ScoreFusion --> CandidateList["Danh sách Khung hình tiềm năng"]
     CandidateList --> WebUI["Web UI hiển thị (Kèm Badge OCR cam)"]
     
     WebUI --> VLMRerankBtn["Người dùng bấm: ⚡ Rerank AI (Top 20)"]
-    VLMRerankBtn --> VLMModel["Qwen2-VL-7B-Instruct 4-bit Reranker"]
-    VLMModel --> StreamImg["Stream 20 Keyframes qua Port 8007"]
-    StreamImg --> VLMScore["Chấm điểm chi tiết 0-10 & Hòa trộn điểm"]
-    VLMScore --> FinalTop["Cập nhật lại kết quả Top-20 (Badge VLM tím)"]
+    VLMRerankBtn --> DiverseFrames["Chọn tối đa 20 frame đa dạng từ Top 100 bằng vector FAISS"]
+    DiverseFrames --> StreamImg["Stream các Keyframe đã chọn qua Port 8007"]
+    StreamImg --> VLMModel["Qwen VLM 4-bit Reranker"]
+    VLMModel --> VLMScore["Chấm 0–10 → Điểm 0–1 & Hòa trộn"]
+    VLMScore --> FinalTop["Sắp xếp nhóm đã chấm; Giữ các frame còn lại phía sau"]
     
     FinalTop --> DRESSubmit["Ghim & Nộp bài trực tiếp lên DRES 1-click"]
 ```
+
+---
+
+- **Multi-Query Retrieval:** SLM sinh 3 nhánh trong một lượt; nhánh chính dịch theo ngữ cảnh. SigLIP encode và FAISS tìm theo batch, gộp Weighted RRF với trọng số **0.7 / 0.2 / 0.1** (`k = 60`).
+- **OCR Soft Boost:** Nhập `115, ambulance` để khớp bất kỳ cụm nào; để trống dùng Regex. Chỉ cộng điểm một lần cho frame đã có trong kết quả; với Multi-Event, OCR áp dụng cho ảnh sự kiện đầu tiên.
+- **Điểm thống nhất 0–1:** Chuẩn hóa RRF, cosine và điểm Multi-Event trước khi kết hợp. Khi dùng OCR: `S = (điểm nền + 0.35 × khớp) / 1.35`; VLM: `0.35 × S + 0.65 × (điểm VLM / 10)`.
+- **Frame đa dạng:** Nút Rerank chọn tối đa **20 frame từ Top 100**; bỏ qua frame cùng video khi vừa gần **≤ 3 giây**, vừa giống **cosine ≥ 0.97**; khác cảnh hoặc cách xa vẫn được giữ.
+- **VLM Reranking:** Chỉ tải/chấm ảnh đã chọn, giữ thang **0–10**. Frame không được chọn vẫn nằm phía sau.
 
 ---
 

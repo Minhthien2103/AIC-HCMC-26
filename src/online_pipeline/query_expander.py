@@ -88,9 +88,10 @@ class QueryExpander:
 Task:
 1. Carefully detect and correct any typos, wrong tone marks, or phonetic misspellings in the user query (for example: "tay đưa xe đạp" -> "tay đua xe đạp" / cyclist, "ngừoi" -> "người", "xe dap" -> "xe đạp").
 2. Translate and generate exactly 3 distinct English visual search descriptions tailored for SigLIP/CLIP keyframe retrieval:
-   - Line 1: Detailed visual scene description (who, what they are doing, visual setting, clothing color)
+   - Line 1: Faithful, natural English translation preserving ALL explicit constraints, actions, relationships, negations, numbers and colors. Translate meaning in context, NEVER word by word. Vietnamese "tay đua xe đạp" means "cyclist" or "bicycle racer", NEVER "hand racing cycle"; "tay" here refers to a person, not a body part. If already English, preserve its meaning.
    - Line 2: Subject and core action focused
    - Line 3: Key objects, colors, and visual tags comma-separated
+3. All three lines must use ONLY information in the input. Do not invent setting, clothing, objects, actions, or visible text. Line 1 is the authoritative query, not a creative expansion.
 
 Output format: Output ONLY the 3 English lines, one per line. No numbering, no prefixes, no explanation, no Vietnamese.
 
@@ -103,7 +104,7 @@ English Visual Descriptions:"""
             inputs = self.tokenizer([chat_text], return_tensors="pt").to(self.device)
 
             with torch.inference_mode():
-                out = self.model.generate(**inputs, max_new_tokens=80, do_sample=False)
+                out = self.model.generate(**inputs, max_new_tokens=192, do_sample=False)
 
             raw_resp = self.tokenizer.batch_decode([out[0][len(inputs.input_ids[0]):]], skip_special_tokens=True)[0]
             lines = []

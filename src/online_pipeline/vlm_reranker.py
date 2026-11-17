@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from PIL import Image
+from src.online_pipeline.score_fusion import unit_score
+from src.online_pipeline.diverse_candidates import select_diverse_indices
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +120,12 @@ class VLMReranker:
         finally:
             self._is_loading = False
 
-    def score_single_frame(self, image: Image.Image, query: str) -> float:
+    def score_single_frame(self, image: Image.Image, query: str) -> Optional[float]:
         """Evaluate how well an image matches the query on a scale of 0.0 to 1.0."""
         if self.model is None or self.processor is None:
             self.load()
         if self.model is None:
-            return 0.5
+            return None
 
         # Resize image for fast inference (max 448x448)
         img_resized = image.copy()
@@ -170,30 +172,39 @@ class VLMReranker:
             if match:
                 score_int = int(match.group(1))
                 return float(score_int) / 10.0
-            return 0.5
+            return None
         except Exception as e:
             logger.warning(f"Error during VLM scoring: {e}")
-            return 0.5
+            return None
 
     def rerank_candidates(
         self,
         candidates: List[Dict[str, Any]],
         query: str,
         top_n: int = 20,
-        vlm_weight: float = 0.65
+        vlm_weight: float = 0.65,
+        diversity_index=None,
+        diversity_pool: int = 100,
+        diversity_similarity: float = 0.97,
+        diversity_seconds: float = 3.0,
     ) -> List[Dict[str, Any]]:
-        """Rerank the top_n candidates using Qwen2-VL visual evaluation."""
+        """Rerank up to top_n diverse candidates; retain all unselected frames."""
         if not candidates or not query or top_n <= 0:
-            return candidates
+            return [dict(c, vlm_selected=False) for c in candidates]
 
         if self.model is None:
             self.load()
         if self.model is None:
-            return candidates
+            return [dict(c, vlm_selected=False) for c in candidates]
 
         t0 = time.time()
-        to_rerank = candidates[:top_n]
-        remaining = candidates[top_n:]
+        vlm_weight = unit_score(vlm_weight)
+        selected = select_diverse_indices(candidates, diversity_index, top_n,
+                                          diversity_pool, diversity_similarity, diversity_seconds)
+        selected_set = set(selected)
+        to_rerank = [dict(candidates[i], entity=dict(candidates[i].get("entity") or {}),
+                          vlm_selected=True) for i in selected]
+        remaining = [dict(c, vlm_selected=False) for i, c in enumerate(candidates) if i not in selected_set]
 
         logger.info(f"[VLM Rerank] Scoring Top {len(to_rerank)} frames for query: '{query[:50]}'...")
 
@@ -201,14 +212,15 @@ class VLMReranker:
             entity = c.get("entity", {}) if isinstance(c.get("entity"), dict) else {}
             v_id = entity.get("video") or c.get("video") or c.get("video_id", "")
             f_name = entity.get("frame_id") or c.get("frame_id") or c.get("keyframe_name", "")
-            orig_score = float(c.get("score") or c.get("distance", 0.5))
+            orig_score = unit_score(c.get("orig_score", c.get("score", c.get("distance", 0.0))))
 
             img = fetch_frame_image(v_id, f_name, media_base=self.media_base)
-            if img is not None:
-                vlm_score = self.score_single_frame(img, query)
+            vlm_score = self.score_single_frame(img, query) if img is not None else None
+            if vlm_score is not None:
+                vlm_score = unit_score(vlm_score)
                 blended_score = (vlm_weight * vlm_score) + ((1.0 - vlm_weight) * orig_score)
                 c["vlm_score"] = round(vlm_score, 3)
-                c["orig_score"] = round(orig_score, 4)
+                c["orig_score"] = orig_score
                 c["score"] = round(blended_score, 4)
                 c["distance"] = round(blended_score, 4)
                 c["vlm_verified"] = True
@@ -216,8 +228,12 @@ class VLMReranker:
                     entity["vlm_score"] = round(vlm_score, 3)
                     entity["vlm_verified"] = True
             else:
-                c["vlm_score"] = 0.0
+                c["score"] = orig_score
+                c["distance"] = orig_score
+                c.pop("vlm_score", None)
                 c["vlm_verified"] = False
+                entity.pop("vlm_score", None)
+                entity["vlm_verified"] = False
 
         # Sort reranked top candidates descending by new blended score
         to_rerank.sort(key=lambda x: x.get("score", 0.0), reverse=True)
