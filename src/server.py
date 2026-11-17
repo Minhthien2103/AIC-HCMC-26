@@ -855,7 +855,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8006, help="Port (default: 8006)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    parser.add_argument("--llm", type=str, default="4b", help="Chọn mô hình SLM: '3b' (Qwen2.5-3B) hoặc '4b' (Qwen3-4B). Mặc định: '4b'")
+    parser.add_argument("--llm", type=str, default="3b", help="Chọn mô hình SLM: '3b' (Qwen2.5-3B) hoặc '4b' (Qwen3-4B). Mặc định: '3b'")
     parser.add_argument("--vlm", type=str, default="3b", help="Chọn mô hình VLM: '3b' (Qwen2.5-VL-3B), '2b' (Qwen2-VL-2B), '7b'. Mặc định: '3b'")
     args = parser.parse_args()
 

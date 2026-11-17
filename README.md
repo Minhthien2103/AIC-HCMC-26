@@ -203,14 +203,14 @@ cd /d d:\STUDY\BIN\CS\PROJECT\AIC-HCMC-26
 conda activate aic26
 # HOẶC nếu dùng uv: aic26\Scripts\activate.bat
 
-# Chạy server (mặc định dùng SLM 4B và VLM 3B):
+# Chạy server (mặc định dùng SLM Qwen2.5-3B và VLM Qwen2.5-VL-3B):
 python src/server.py --port 8006
 
-# Tùy chọn đổi SLM sang 3B:
-python src/server.py --port 8006 --llm 3b
+# Tùy chọn đổi SLM sang 4B:
+python src/server.py --port 8006 --llm 4b
 
 # Tùy chọn cấu hình cả SLM và VLM (3b / 2b / 7b):
-python src/server.py --port 8006 --llm 3b --vlm 3b
+python src/server.py --port 8006 --llm 3b --vlm 2b
 ```
 
 👉 Sau khi terminal hiện `Uvicorn running on http://0.0.0.0:8006`, mở trình duyệt web truy cập ngay địa chỉ: **`http://localhost:8006`** để bắt đầu thi đấu!
@@ -240,8 +240,8 @@ Hệ thống hỗ trợ nộp bài tự động qua API DRES hoặc xuất kết
 | Mô hình | Trọng số / Checkpoint | Chế độ chạy | VRAM tiêu thụ | Vai trò trong hệ thống & Tùy chọn CLI |
 |---|---|---|---|---|
 | **Google SigLIP** | `ViT-SO400M-14-SigLIP` (webli) | FP16 trên GPU | ~1.5 GB | Trích xuất đặc trưng hình ảnh và văn bản đa ngôn ngữ (1152-dim). |
-| **Qwen3-4B** *(Mặc định)* | `Qwen/Qwen3-4B` | 4-bit (`nf4` BnB) | ~2.5 GB | SLM Mở rộng query SOTA (< 0.2s trên GPU). Bật bằng: `--llm 4b`. |
-| **Qwen2.5-3B** *(Tùy chọn)* | `Qwen/Qwen2.5-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.05 GB | SLM Mở rộng query nhẹ hơn. Bật bằng: `--llm 3b`. |
+| **Qwen2.5-3B** *(Mặc định)* | `Qwen/Qwen2.5-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.05 GB | SLM Mở rộng query SOTA chuẩn xác (< 0.2s trên GPU). Bật bằng: `--llm 3b`. |
+| **Qwen3-4B** *(Tùy chọn)* | `Qwen/Qwen3-4B` | 4-bit (`nf4` BnB) | ~2.5 GB | SLM Mở rộng query thay thế. Bật bằng: `--llm 4b`. |
 | **Qwen2.5-VL-3B** *(Mặc định)* | `Qwen/Qwen2.5-VL-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.1 GB | VLM Reranker Top-20 SOTA & KIS-QA (~0.8s). Bật bằng: `--vlm 3b`. |
 | **Qwen2-VL-2B** *(Tùy chọn)* | `Qwen/Qwen2-VL-2B-Instruct` | 4-bit (`nf4` BnB) | ~1.5 GB | VLM Reranker siêu nhẹ cho máy tiết kiệm VRAM. Bật bằng: `--vlm 2b`. |
 | **Qwen2-VL-7B** *(Tùy chọn)* | `Qwen/Qwen2-VL-7B-Instruct` | 4-bit (`nf4` BnB) | ~4.5 GB | VLM Reranker bản lớn (cần máy >12GB VRAM nếu chạy cùng SLM). Bật bằng: `--vlm 7b`. |

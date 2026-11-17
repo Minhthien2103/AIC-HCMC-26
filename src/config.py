@@ -53,7 +53,7 @@ ZILLIZ_CLIP_PRETRAINED = os.getenv("AIC_ZILLIZ_PRETRAINED", "datacompdr")
 ZILLIZ_CLIP_DIM = 512
 
 ENABLE_LLM_EXPANSION = os.getenv("AIC_LLM_EXPANSION", "true").lower() == "true"
-LLM_MODEL_ID = os.getenv("AIC_LLM_MODEL", "Qwen/Qwen3-4B")
+LLM_MODEL_ID = os.getenv("AIC_LLM_MODEL", "Qwen/Qwen2.5-3B-Instruct")
 LLM_DEVICE = os.getenv("AIC_LLM_DEVICE", "cuda").lower()
 
 # ── OCR Text Search & Boosting Configuration ────────────────────────────────
