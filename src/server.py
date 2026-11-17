@@ -40,10 +40,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import config
-from src.online_pipeline.object_filter import ObjectFilter
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.retrieval import RetrievalEngine
+from src.online_pipeline.text_search import TextSearchEngine
+from src.online_pipeline.vlm_reranker import VLMReranker
 from src.tasks.kis_t import KIStask
 from src.tasks.trake import TrakeTask
 from src.utils.translation import translate_vi_to_en
@@ -63,6 +64,13 @@ logger = logging.getLogger("aic_server")
 class TextQueryRequest(BaseModel):
     First_query: str
     Next_query: Optional[str] = ""
+    vlm_rerank: Optional[bool] = False
+
+
+class RerankRequest(BaseModel):
+    query: str
+    candidates: List[Dict[str, Any]]
+    top_n: Optional[int] = 20
 
 
 class SimilaritySearchRequest(BaseModel):
@@ -84,12 +92,38 @@ class VQAQueryRequest(BaseModel):
     top_k: Optional[int] = 50
 
 
+def resolve_llm_model(model_name_or_alias: Optional[str]) -> str:
+    """Resolve shortcut aliases ('3b', '4b') to full HuggingFace model IDs."""
+    if not model_name_or_alias:
+        return getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B")
+    alias = str(model_name_or_alias).strip().lower()
+    if alias in ("3b", "3", "qwen-3b", "qwen2.5-3b", "qwen2.5-3b-instruct"):
+        return "Qwen/Qwen2.5-3B-Instruct"
+    elif alias in ("4b", "4", "qwen-4b", "qwen3-4b"):
+        return "Qwen/Qwen3-4B"
+    return str(model_name_or_alias).strip()
+
+
+def resolve_vlm_model(model_name_or_alias: Optional[str]) -> str:
+    """Resolve shortcut aliases ('2b', '3b', '7b') to full HuggingFace VLM model IDs."""
+    if not model_name_or_alias:
+        return getattr(config, "VLM_MODEL_ID", "Qwen/Qwen2.5-VL-3B-Instruct")
+    alias = str(model_name_or_alias).strip().lower()
+    if alias in ("2b", "2", "qwen2-vl-2b", "qwen2-vl-2b-instruct"):
+        return "Qwen/Qwen2-VL-2B-Instruct"
+    elif alias in ("3b", "3", "qwen2.5-vl-3b", "qwen2.5-vl-3b-instruct", "qwen3-vl-2b"):
+        return "Qwen/Qwen2.5-VL-3B-Instruct"
+    elif alias in ("7b", "7", "qwen2-vl-7b", "qwen2-vl-7b-instruct"):
+        return "Qwen/Qwen2-VL-7B-Instruct"
+    return str(model_name_or_alias).strip()
+
+
 # ==============================================================================
 # Service Container
 # ==============================================================================
 
 class SearchService:
-    def __init__(self):
+    def __init__(self, llm_model: Optional[str] = None, vlm_model: Optional[str] = None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"Using device: {self.device}")
 
@@ -118,19 +152,46 @@ class SearchService:
             retriever=self.retriever
         )
 
-        # Initialize Local LLM Query Expander (Qwen2.5-3B in 4-bit)
+        # Initialize Local LLM Query Expander (Loads ONLY the chosen model: 3B or 4B)
         if getattr(config, "ENABLE_LLM_EXPANSION", True):
             try:
+                selected_llm = resolve_llm_model(llm_model or getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B"))
+                llm_device = getattr(config, "LLM_DEVICE", "cuda")
+                logger.info(f"Using Query Expander SLM: {selected_llm} on {llm_device}")
                 self.expander = QueryExpander(
-                    model_id=getattr(config, "LLM_MODEL_ID", "Qwen/Qwen2.5-3B-Instruct"),
-                    device=self.device,
-                    load_in_4bit=True
+                    model_id=selected_llm,
+                    device=llm_device,
+                    load_in_4bit=(llm_device == "cuda")
                 )
             except Exception as e:
                 logger.warning(f"Could not initialize QueryExpander: {e}")
                 self.expander = None
         else:
             self.expander = None
+
+        # Initialize OCR Text Search Engine
+        if getattr(config, "ENABLE_OCR_SEARCH", True):
+            try:
+                self.text_search = TextSearchEngine(ocr_parquet_path=config.OCR_PARQUET_PATH)
+            except Exception as e:
+                logger.warning(f"Could not initialize TextSearchEngine: {e}")
+                self.text_search = None
+        else:
+            self.text_search = None
+
+        # Initialize VLM Reranker (Single model selected by user or config)
+        chosen_vlm = resolve_vlm_model(vlm_model or getattr(config, "VLM_MODEL_ID", "Qwen/Qwen2.5-VL-3B-Instruct"))
+        try:
+            self.vlm_reranker = VLMReranker(
+                model_id=chosen_vlm,
+                device=self.device,
+                media_base="http://localhost:8007",
+                load_mode="4bit"
+            )
+            logger.info(f"Using VLM Reranker: {chosen_vlm}")
+        except Exception as e:
+            logger.warning(f"Could not initialize VLMReranker: {e}")
+            self.vlm_reranker = None
 
         # Cache of latest results for pagination
         self.last_results: List[Dict[str, Any]] = []
@@ -141,22 +202,30 @@ class SearchService:
         """Format candidate dictionary to Milvus-compatible JSON structure expected by frontend."""
         formatted = []
         for idx, cand in enumerate(candidates[:limit]):
-            v_id = str(cand.get("video_id", ""))
+            v_id = str(cand.get("video_id") or cand.get("video", ""))
             k_name = str(cand.get("keyframe_name") or cand.get("frame_id", ""))
             pts_time = float(cand.get("pts_time", 0.0))
             score = float(cand.get("score", 0.0))
             f_idx = int(cand.get("faiss_idx", idx))
 
+            entity_payload: Dict[str, Any] = {
+                "video": v_id,
+                "frame_id": k_name,
+                "time": pts_time,
+                "path": f"keyframes/{v_id}/{k_name}.jpg"
+            }
+            if "ocr_match" in cand:
+                entity_payload["ocr_match"] = cand["ocr_match"]
+            if "vlm_score" in cand:
+                entity_payload["vlm_score"] = cand["vlm_score"]
+            if "vlm_verified" in cand:
+                entity_payload["vlm_verified"] = cand["vlm_verified"]
+
             formatted.append({
                 "id": f_idx,
                 "distance": score,
                 "score": score,
-                "entity": {
-                    "video": v_id,
-                    "frame_id": k_name,
-                    "time": pts_time,
-                    "path": f"keyframes/{v_id}/{k_name}.jpg"
-                }
+                "entity": entity_payload
             })
         return formatted
 
@@ -200,14 +269,45 @@ class SearchService:
         if len(vecs) == 1:
             query_vec = vecs[0].reshape(1, -1)
         else:
-            # Weighted blending: prioritize the primary detailed description
-            weights = np.array([0.5, 0.25, 0.25][:len(vecs)], dtype=np.float32).reshape(-1, 1)
+            # Weighted blending: prioritize the primary detailed description using config.EXPANSION_WEIGHTS
+            raw_weights = config.EXPANSION_WEIGHTS[:len(vecs)]
+            weights = np.array(raw_weights, dtype=np.float32).reshape(-1, 1)
             weights = weights / weights.sum()
             blended = np.sum(vecs * weights, axis=0)
             norm = np.linalg.norm(blended)
             query_vec = (blended / (norm + 1e-8)).astype(np.float32).reshape(1, -1)
 
         return query_vec, variations
+
+    def apply_ocr_boost(self, candidates: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+        """Boost candidate scores if deterministic OCR entities match."""
+        if not getattr(config, "ENABLE_OCR_SEARCH", True) or self.text_search is None:
+            return candidates
+
+        ocr_kws = self.text_search.extract_deterministic_keywords(query)
+        if not ocr_kws:
+            return candidates
+
+        ocr_matches = self.text_search.search_candidates(ocr_kws, boost_score=config.OCR_BOOST_WEIGHT)
+        if not ocr_matches:
+            return candidates
+
+        boost_count = 0
+        for c in candidates:
+            v_id = c.get("video_id", "")
+            k_name = str(c.get("keyframe_name") or c.get("frame_id", ""))
+            key = (v_id, k_name)
+            if key in ocr_matches:
+                match_info = ocr_matches[key]
+                c["score"] = float(c.get("score", 0.0)) + float(match_info["boost"])
+                c["ocr_match"] = match_info["matched_keyword"]
+                boost_count += 1
+
+        if boost_count > 0:
+            logger.info(f"[OCR Boost] Boosted {boost_count} candidate frames for keywords: {ocr_kws}")
+            candidates.sort(key=lambda x: -float(x.get("score", 0.0)))
+
+        return candidates
 
     def process_temporal_query(
         self,
@@ -219,6 +319,7 @@ class SearchService:
         if not second_query.strip():
             q1_vec, _ = self.encode_and_expand_query(first_query)
             candidates = self.retriever.search(q1_vec, top_k=top_k)
+            candidates = self.apply_ocr_boost(candidates, first_query)
             return self.format_results(candidates, limit=top_k)
 
         # Temporal Query: expand and encode both events
@@ -274,6 +375,7 @@ class SearchService:
         if len(clean_queries) == 1:
             q_vec, _ = self.encode_and_expand_query(clean_queries[0])
             candidates = self.retriever.search(q_vec, top_k=top_k)
+            candidates = self.apply_ocr_boost(candidates, clean_queries[0])
             return self.format_results(candidates, limit=top_k)
 
         if len(clean_queries) == 2:
@@ -367,7 +469,7 @@ class SearchService:
         if len(vecs) == 1:
             query_vec = vecs[0].reshape(1, -1)
         else:
-            blended = 0.5 * vecs[0] + 0.5 * vecs[1]
+            blended = config.MIXED_IMAGE_WEIGHT * vecs[0] + config.MIXED_TEXT_WEIGHT * vecs[1]
             norm = np.linalg.norm(blended)
             query_vec = (blended / (norm + 1e-8)).astype(np.float32).reshape(1, -1)
 
@@ -406,7 +508,7 @@ class SearchService:
 # FastAPI Application Factory
 # ==============================================================================
 
-def create_app() -> FastAPI:
+def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None) -> FastAPI:
     app = FastAPI(
         title="AIC-HCMC-26 AI Retrieval Service",
         description="Unified local FastAPI server powered by RTX 4060 GPU and FAISS",
@@ -425,8 +527,8 @@ def create_app() -> FastAPI:
     # Enable GZip for large JSON result payloads
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-    # Initialize Service
-    service = SearchService()
+    # Initialize Service EXACTLY ONCE with chosen models
+    service = SearchService(llm_model=llm_model, vlm_model=vlm_model)
 
     # Active websocket tracking
     active_websockets: List[WebSocket] = []
@@ -476,6 +578,17 @@ def create_app() -> FastAPI:
                 }
 
             results = service.process_multi_event_query(queries)
+
+            # Optional VLM Reranking on Top-K if requested
+            if (data.get("vlm_rerank", False) or getattr(config, "ENABLE_VLM_RERANK", False)) and service.vlm_reranker is not None:
+                if queries:
+                    results = service.vlm_reranker.rerank_candidates(
+                        results,
+                        query=queries[0],
+                        top_n=config.VLM_RERANK_TOP_K,
+                        vlm_weight=config.VLM_RERANK_WEIGHT
+                    )
+
             service.last_results = results
 
             expanded_info = [service.expander.cache.get(q.strip(), []) for q in queries] if service.expander else []
@@ -489,6 +602,44 @@ def create_app() -> FastAPI:
             }
         except Exception as e:
             logger.error(f"Error in /TextQuery: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/rerank")
+    async def rerank_endpoint(request: Request):
+        """Rerank top candidates using Qwen2-VL-7B (4-bit)."""
+        try:
+            body = await request.body()
+            data = json.loads(body.decode("utf-8")) if body else {}
+            query = data.get("query", "")
+            candidates = data.get("candidates")
+            top_n = int(data.get("top_n", config.VLM_RERANK_TOP_K))
+
+            if candidates is None:
+                candidates = service.last_results
+
+            if not query and service.expander and service.expander.cache:
+                query = list(service.expander.cache.keys())[-1]
+
+            if not candidates or not query:
+                return {"kq": candidates or [], "status": "no_candidates_or_query"}
+
+            if service.vlm_reranker is None:
+                return {"kq": candidates, "status": "vlm_not_configured"}
+
+            reranked = service.vlm_reranker.rerank_candidates(
+                candidates=candidates,
+                query=query,
+                top_n=top_n,
+                vlm_weight=config.VLM_RERANK_WEIGHT
+            )
+            service.last_results = reranked
+            return {
+                "kq": reranked,
+                "status": "success",
+                "reranked_count": min(top_n, len(candidates))
+            }
+        except Exception as e:
+            logger.error(f"Error in /rerank: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/similarity_search")
@@ -704,8 +855,17 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8006, help="Port (default: 8006)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    parser.add_argument("--llm", type=str, default="4b", help="Chọn mô hình SLM: '3b' (Qwen2.5-3B) hoặc '4b' (Qwen3-4B). Mặc định: '4b'")
+    parser.add_argument("--vlm", type=str, default="3b", help="Chọn mô hình VLM: '3b' (Qwen2.5-VL-3B), '2b' (Qwen2-VL-2B), '7b'. Mặc định: '3b'")
     args = parser.parse_args()
 
-    app = create_app()
-    logger.info(f"Starting server on http://{args.host}:{args.port} ...")
+    chosen_llm = resolve_llm_model(args.llm)
+    chosen_vlm = resolve_vlm_model(args.vlm)
+
+    # Initialize app EXACTLY ONCE with the requested models
+    app = create_app(llm_model=chosen_llm, vlm_model=chosen_vlm)
+    logger.info(f"Starting server with SLM={chosen_llm}, VLM={chosen_vlm} on http://{args.host}:{args.port} ...")
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
+else:
+    # Only created when imported as an ASGI module (e.g. `uvicorn src.server:app`)
+    app = create_app()

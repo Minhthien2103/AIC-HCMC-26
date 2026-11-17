@@ -41,20 +41,25 @@ B. CƠ SỞ DỮ LIỆU HIỆN TẠI — ĐÃ ĐỦ 100%, KHÔNG CẦN CÀI THÊ
 - KHÔNG CẦN MySQL, PostgreSQL, SQLite, hay Zilliz Cloud cho pipeline thi đấu chính.
 
 ────────────────────────────────────────────────────────────────────────────────
-C. BƯỚC TIẾP THEO: VLM RERANKING, OCR, ASR and MULTI-QUERY EXPANSION
+C. BƯỚC ĐÃ HOÀN TẤT & TRẠNG THÁI HIỆN TẠI
 ────────────────────────────────────────────────────────────────────────────────
 
-- Tích hợp VLM Reranking Top-30/50 bằng Qwen2-VL-7B-Instruct (4-bit quantization trên RTX 4060):
-  1. FAISS SigLIP quét siêu nhanh lấy Top 30-50 frames tiềm năng.
-  2. Qwen2-VL chấm điểm chi tiết câu query và ảnh để đẩy đúng frame lên Top 1-3.
+1. Multi-Query Expansion & Typo Correction:
+   - ✅ Hoàn thành tích hợp `src/online_pipeline/query_expander.py` bằng `Qwen2.5-3B-Instruct` 4-bit.
+   - ✅ Sửa lỗi gõ Telex tiếng Việt, sinh 3 prompt chuyên biệt cho SigLIP (Scene, Action, Tags).
 
-- OCR & Whisper ASR
-  1. OCR: Chạy PaddleOCR hoặc EasyOCR trên các frame để trích xuất text → Lưu vào bảng ocr_text.parquet.
-  2. ASR: Chạy Whisper nhỏ (whisper-base hoặc whisper-small) bóc tách lời thoại tiếng Việt từ file MP4 gốc → transcripts.parquet.
-  Khi người dùng search, hệ thống vừa so khớp vector hình ảnh, vừa đối chiếu từ khóa trong text/audio → Những câu có tên riêng, biển hiệu hay số xe sẽ tìm trúng 100%.
+2. OCR Extraction & Search Engine:
+   - 🔄 Đang chạy trích xuất EasyOCR subsampled (`scripts/extract_ocr_easyocr.py`) đạt > 82% (591/726 videos).
+   - ✅ Đã tạo `src/online_pipeline/text_search.py`: Trích xuất thực thể số / biển số / từ khóa cứng bằng luật Deterministic Regex (chống 100% LLM hallucination).
+   - ✅ Đã tích hợp Soft Boost (+0.35 điểm) trong `src/server.py`. Khi có kết quả OCR, các frame khớp số/chữ sẽ được đẩy lên Top 1 mà không gạt bỏ candidate của FAISS.
+   - ✅ Giao diện Web hiển thị badge màu cam `🔤 [OCR: ...]` trên khung hình khớp chữ.
 
-- Multi-Query Expansion: Dùng một LLM nhỏ phân rã câu hỏi của đề thi thành 3 thành phần:
-  1. Visual Description: Mô tả quang cảnh cho CLIP (ví dụ: "an outdoor street intersection with green trees").
-  2. Salient Objects: Danh sách vật thể trọng tâm ("ambulance, traffic light, bicycle").
-  3. Text / OCR: Các từ khóa có thể xuất hiện dạng chữ ("115, cấp cứu").
-Thực hiện search đa luồng và dùng RRF (Reciprocal Rank Fusion) gộp điểm số lại.
+3. VLM Reranking (Qwen2-VL-7B-Instruct 4-bit):
+   - ✅ Đã tạo `src/online_pipeline/vlm_reranker.py`: So khớp thị giác chi tiết Top 20 candidate.
+   - ✅ Đã tạo endpoint `/rerank` trong `src/server.py`.
+   - ✅ Đã thêm nút bấm `⚡ Rerank AI (Top 20)` và hiển thị badge `🤖 [VLM: X/10]` trực tiếp trên Web UI.
+   - ✅ Đã loại bỏ ASR theo thống nhất để giữ hệ thống tinh gọn và an toàn.
+
+
+
+   Tài khoản nhóm (team12_t5 - 123456)

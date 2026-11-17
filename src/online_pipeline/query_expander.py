@@ -28,7 +28,10 @@ class QueryExpander:
             logger.info(f"Loading local LLM for Query Expansion: {self.model_id} (4-bit={self.load_in_4bit})...")
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=True)
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=True)
+            except Exception:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=False)
 
             if self.load_in_4bit:
                 bnb_config = BitsAndBytesConfig(
@@ -36,19 +39,30 @@ class QueryExpander:
                     bnb_4bit_quant_type="nf4",
                     bnb_4bit_compute_dtype=torch.float16
                 )
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    self.model_id,
-                    quantization_config=bnb_config,
-                    device_map="cuda",
-                    local_files_only=True
-                )
+                try:
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_id,
+                        quantization_config=bnb_config,
+                        device_map="cuda",
+                        local_files_only=True
+                    )
+                except Exception:
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_id,
+                        quantization_config=bnb_config,
+                        device_map="cuda",
+                        local_files_only=False
+                    )
             else:
+                dtype = torch.bfloat16 if self.device == "cpu" else torch.float16
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.model_id,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    device_map="auto" if self.device == "cuda" else None,
+                    torch_dtype=dtype,
+                    device_map=None if self.device == "cpu" else "auto",
                     local_files_only=True
                 )
+                if self.device == "cpu":
+                    self.model.to("cpu")
             self.model.eval()
             logger.info("QueryExpander LLM loaded successfully.")
         except Exception as e:

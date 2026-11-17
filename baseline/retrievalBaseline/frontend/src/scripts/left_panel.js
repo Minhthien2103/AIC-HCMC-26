@@ -687,6 +687,42 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Wire VLM Rerank button (Qwen2-VL-7B)
+    const rerankBtn = document.getElementById('vlm-rerank-btn');
+    if (rerankBtn) {
+        rerankBtn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            const originalHtml = rerankBtn.innerHTML;
+            rerankBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Đang Rerank...';
+            rerankBtn.disabled = true;
+            try {
+                const firstSceneTa = document.getElementById('Text-Query-First');
+                const queryText = firstSceneTa ? firstSceneTa.value.trim() : "";
+                const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || "http://localhost:8006";
+                const response = await fetch(`${backendBase}/rerank`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: queryText, top_n: 20 })
+                });
+                const data = await response.json();
+                if (data && data.kq && typeof updateRightPanel_list === 'function') {
+                    updateRightPanel_list(data.kq);
+                    if (typeof showTemporaryAlert === 'function') {
+                        showTemporaryAlert(`Đã Rerank Top ${data.reranked_count || 20} frame bằng Qwen2-VL thành công!`, 'success');
+                    }
+                }
+            } catch (err) {
+                console.error("VLM Rerank error:", err);
+                if (typeof showTemporaryAlert === 'function') {
+                    showTemporaryAlert("Lỗi kết nối khi gọi VLM Rerank!", 'error');
+                }
+            } finally {
+                rerankBtn.innerHTML = originalHtml;
+                rerankBtn.disabled = false;
+            }
+        });
+    }
+
     // Wire Task Selector Change
     const taskSelect = document.getElementById('global-task-select');
     if (taskSelect) {

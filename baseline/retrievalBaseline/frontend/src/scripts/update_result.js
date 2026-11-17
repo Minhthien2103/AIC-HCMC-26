@@ -45,9 +45,19 @@ function createImageDiv(result, index) {
   const frameInfo = `${result.entity.video}-${parseFloat(result.entity.time.toFixed(2))}`;
   const imgUrl = resolveResultImageUrl(result);
 
+  const ocrBadge = result.entity.ocr_match 
+    ? `<div class="ocr-match-badge" style="position:absolute; top:4px; left:4px; background:#ea580c; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Khớp OCR: ${result.entity.ocr_match}">🔤 ${result.entity.ocr_match}</div>` 
+    : '';
+  const vlmBadge = result.entity.vlm_score !== undefined 
+    ? `<div class="vlm-score-badge" style="position:absolute; top:4px; right:4px; background:#4f46e5; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.4);" title="Điểm VLM AI: ${result.entity.vlm_score}">🤖 ${(result.entity.vlm_score * 10).toFixed(0)}/10</div>` 
+    : '';
+
   const div = document.createElement('div');
   div.className = 'img-dis';
-    div.innerHTML = `
+  div.style.position = 'relative';
+  div.innerHTML = `
+    ${ocrBadge}
+    ${vlmBadge}
     <img alt="" class="result" loading="lazy" height="100px" id="${index}" data-src="${imgUrl}" src="${imgUrl}">
     <div class="infor" title="Click trái: xem video | Chuột phải: xem timeline">${frameInfo}</div>
     <div name="similarity_search" class="similarity_search similarity-search-badge" title="Tìm ảnh tương đồng (Similarity Search)">⚡ Tương đồng</div>
