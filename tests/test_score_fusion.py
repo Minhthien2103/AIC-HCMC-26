@@ -1,4 +1,6 @@
 import ast
+from contextlib import closing
+from src.online_pipeline.image_prefetch import prefetch_images
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -83,7 +85,7 @@ class RerankTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / 'src/online_pipeline/vlm_reranker.py'
         tree = ast.parse(source.read_text(encoding='utf-8'))
         node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'VLMReranker')
-        scope = dict(select_diverse_indices=select_diverse_indices, unit_score=unit_score, time=time, logger=logging.getLogger(__name__),
+        scope = dict(closing=closing, prefetch_images=prefetch_images, select_diverse_indices=select_diverse_indices, unit_score=unit_score, time=time, logger=logging.getLogger(__name__),
                      fetch_frame_image=lambda *a, **kw: object())
         exec(compile('from __future__ import annotations\n' + ast.unparse(node), str(source), 'exec'), scope)
         reranker = scope['VLMReranker'].__new__(scope['VLMReranker'])
@@ -114,6 +116,9 @@ class RerankTests(unittest.TestCase):
         self.assertEqual([c['id'] for c in diverse], [0, 2, 1])
         self.assertEqual([c['vlm_selected'] for c in diverse], [True, True, False])
         self.assertEqual(diverse[-1]['score'], candidates[1]['score'])
+        serial = reranker.rerank_candidates(candidates, 'query', top_n=2,
+                                           diversity_index=index, image_workers=1)
+        self.assertEqual(diverse, serial)
 
 
 if __name__ == '__main__':

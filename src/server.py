@@ -609,6 +609,7 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                         diversity_pool=config.VLM_DIVERSITY_POOL,
                         diversity_similarity=config.VLM_DIVERSITY_SIMILARITY,
                         diversity_seconds=config.VLM_DIVERSITY_SECONDS,
+                        image_workers=config.VLM_IMAGE_WORKERS,
                     )
 
             service.last_results = results
@@ -659,6 +660,7 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                 diversity_pool=config.VLM_DIVERSITY_POOL,
                 diversity_similarity=config.VLM_DIVERSITY_SIMILARITY,
                 diversity_seconds=config.VLM_DIVERSITY_SECONDS,
+                image_workers=config.VLM_IMAGE_WORKERS,
             )
             service.last_results = reranked
             return {
