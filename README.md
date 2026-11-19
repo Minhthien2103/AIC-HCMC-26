@@ -217,28 +217,15 @@ ssh -N -L 8007:localhost:8007 team12@192.168.28.112
 
 ### Bước 3.5: Khởi động Hệ thống & Mở Web UI (Chỉ duy nhất 1 lệnh trên CMD)
 
-**Truy vấn Việt/Anh trên nhánh `test`:** tiếng Anh được giữ nguyên; tiếng Việt
-có dấu cần mô hình Qwen local hoạt động. Luồng tìm kiếm text không âm thầm gọi
-Google hay đưa tiếng Việt vào SigLIP khi dịch lỗi. Nếu thiếu model, web báo lỗi;
-có thể dùng truy vấn tiếng Anh trong lúc chuẩn bị model local.
+**Xử lý truy vấn trên nhánh `test`:** dùng luồng của `main`: mở rộng truy vấn
+khi bật LLM, nếu không thì dùng bộ dịch dự phòng hiện có. Không bắt buộc model
+dịch local và không áp dụng quy tắc bỏ qua dịch riêng cho tiếng Anh. Phần xử lý
+tiếng Việt sẽ được cải thiện sau.
 
-Sau khi tìm, mở **Truy vấn thực tế dùng để tìm** dưới nút tìm kiếm để xem nguồn
-dịch, từng đoạn tiếng Anh và số token. Mô tả dài được chia thành nhiều đoạn
-theo giới hạn tokenizer, rồi hợp nhất thứ hạng; chi tiết cuối không bị cắt bỏ
-chỉ vì vượt context length. Kiểm tra bản dịch và sửa trực tiếp ô mô tả nếu cần.
-`GET /config` cũng trả trạng thái `translation.ready` và `translation.load_error`.
+Sau khi tìm, mở **Truy vấn thực tế dùng để tìm** dưới nút tìm kiếm để xem các
+đoạn đã đưa vào encoder và số token. Mô tả dài được chia thành nhiều đoạn theo
+giới hạn tokenizer rồi hợp nhất thứ hạng để giữ cả chi tiết cuối câu.
 
-Model local cần đủ **trọng số**, không chỉ các file tokenizer. Nếu đã đồng ý tải
-model từ Hugging Face, có thể chuẩn bị một lần trong đúng môi trường Conda:
-
-```cmd
-python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-3B-Instruct')"
-```
-
-Lệnh này tải model dung lượng nhiều GB, không gửi câu truy vấn; bước chuẩn bị
-model không được tự chạy bởi backend. Sau đó khởi động bằng `--llm 3b` và kiểm
-tra log `QueryExpander LLM loaded successfully`. Việc dịch/inference chạy local.
-Nếu dùng cache khác mặc định, chuẩn bị và chạy backend với cùng `HF_HOME`.
 Server backend đã được tích hợp sẵn toàn bộ API, nạp các mô hình AI và **tự động mount toàn bộ giao diện Web UI**. Bạn chỉ cần mở **duy nhất 1 cửa sổ CMD**:
 
 ```cmd

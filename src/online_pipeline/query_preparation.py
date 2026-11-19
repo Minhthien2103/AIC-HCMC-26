@@ -1,35 +1,40 @@
 """Auditable query preparation without GPU dependencies."""
-import re
-import unicodedata
+import logging
+
+from src.utils.translation import translate_vi_to_en
+
+logger = logging.getLogger(__name__)
 
 
 class QueryPreparationError(ValueError):
     pass
 
 
-def has_vietnamese_marks(text):
-    text = unicodedata.normalize("NFC", text)
-    return bool(re.search(r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]", text, re.I))
-
-
 def prepare_english(query, expander):
-    query = " ".join(query.split())
+    """Use main's optional expansion and translation fallback for all queries."""
+    query = query.strip()
     if not query:
         return {"input": query, "source": "empty", "english": [], "warnings": []}
-    if not has_vietnamese_marks(query):
-        return {"input": query, "source": "original", "english": [query], "warnings": []}
 
-    if expander is None or getattr(expander, "model", None) is None:
-        raise QueryPreparationError(
-            "Mô hình dịch local chưa sẵn sàng. Hãy nhập tiếng Anh để tìm, hoặc cài đủ trọng số mô hình rồi khởi động lại backend (--llm 3b). Không gửi truy vấn tới dịch vụ ngoài.")
-    try:
-        variants = [str(value).strip() for value in expander.expand(query) if str(value).strip()]
-    except Exception as error:
-        raise QueryPreparationError("Mô hình local không dịch được truy vấn. Hãy dùng bản tiếng Anh và kiểm tra log backend.") from error
-    if not variants or has_vietnamese_marks(variants[0]) or variants[0].casefold() == query.casefold():
-        raise QueryPreparationError("Mô hình local chưa trả bản tiếng Anh hợp lệ. Đã dừng tìm kiếm; hãy sửa bằng bản tiếng Anh để tránh kết quả lệch.")
-    english = list(dict.fromkeys(v for v in variants[:3] if not has_vietnamese_marks(v)))
-    return {"input": query, "source": "local_llm", "english": english, "warnings": []}
+    variants = []
+    source = "local_llm"
+    if expander is not None:
+        try:
+            variants = expander.expand(query)
+        except Exception as error:
+            logger.warning("Query expansion failed for %r: %s", query, error)
+    if not variants:
+        source = "translator"
+        try:
+            translated = translate_vi_to_en(query)
+            variants = [translated.strip()] if translated and translated.strip() else [query]
+        except Exception as error:
+            logger.warning("Translation fallback for %r: %s", query, error)
+            variants = [query]
+        if variants == [query]:
+            source = "original"
+    variants = [value.strip() for value in variants if value.strip()][:3]
+    return {"input": query, "source": source, "english": variants, "warnings": []}
 
 
 def split_for_encoder(text, count_tokens, limit):

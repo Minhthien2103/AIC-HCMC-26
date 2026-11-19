@@ -557,12 +557,6 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
     @app.get("/config")
     async def get_config():
         return {
-            "translation": {
-                "mode": "local_only",
-                "ready": service.expander is not None and service.expander.model is not None,
-                "model": getattr(service.expander, "model_id", None),
-                "load_error": getattr(service.expander, "load_error", None),
-            },
             "clip_model": config.CLIP_MODEL_NAME,
             "clip_dim": config.CLIP_DIM,
             "device": service.device,

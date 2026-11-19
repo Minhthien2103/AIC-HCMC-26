@@ -28,12 +28,12 @@ test('actual English query remains visible on a cache hit', async () => {
   assert.match(f.get('query-diagnostics-text').textContent, /Cyclist number 71/);
 });
 
-test('translation error is shown and previous frames are cleared; failed queries are not cached', async () => {
+test('search error is shown and previous frames are cleared; failed queries are not cached', async () => {
   let calls=0;
-  const f=fixture(async()=>{calls++; return {ok:false,json:async()=>({detail:'Local translator unavailable'})};});
+  const f=fixture(async()=>{calls++; return {ok:false,json:async()=>({detail:'Search backend unavailable'})};});
   await f.run("performSearchMulti(['đua xe đạp'])");
   assert.equal(f.get('query-error').hidden,false);
-  assert.match(f.get('query-error').textContent,/Local translator unavailable/);
+  assert.match(f.get('query-error').textContent,/Search backend unavailable/);
   assert.equal(f.updates.at(-1).length,0);
   await f.run("performSearchMulti(['đua xe đạp'])");
   assert.equal(calls,2);

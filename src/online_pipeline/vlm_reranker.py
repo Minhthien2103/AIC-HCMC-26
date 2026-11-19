@@ -247,7 +247,7 @@ class VLMReranker:
         # Sort reranked top candidates descending by new blended score
         to_rerank.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
-        elapsed = time.time() - t0
+        elapsed = max(time.time() - t0, 1e-9)
         logger.info(f"[VLM Rerank] Finished reranking {len(to_rerank)} frames in {elapsed:.2f}s ({len(to_rerank)/elapsed:.1f} FPS)")
 
         return to_rerank + remaining

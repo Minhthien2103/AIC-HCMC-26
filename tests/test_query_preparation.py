@@ -2,6 +2,7 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from src.online_pipeline.query_preparation import (
     QueryPreparationError, prepare_english, prepare_chunks, split_for_encoder,
@@ -13,32 +14,41 @@ EN = "Three cyclists on a dusty road. The last rider wears number 71."
 
 
 class QueryPreparationTests(unittest.TestCase):
-    def test_english_is_unchanged_and_does_not_call_translator(self):
-        def forbidden(_):
-            raise AssertionError("English must bypass expansion")
-        plan = prepare_english(EN, SimpleNamespace(model=True, expand=forbidden))
+    @patch("src.online_pipeline.query_preparation.translate_vi_to_en", return_value=EN)
+    def test_missing_local_model_uses_existing_translator(self, translate):
+        plan = prepare_english(VI, None)
+        translate.assert_called_once_with(VI)
         self.assertEqual(plan["english"], [EN])
-        self.assertEqual(plan["source"], "original")
+        self.assertEqual(plan["source"], "translator")
 
-    def test_missing_model_blocks_vietnamese_instead_of_silent_fallback(self):
-        for expander in [None, SimpleNamespace(model=None)]:
-            with self.assertRaises(QueryPreparationError):
-                prepare_english(VI, expander)
+    @patch("src.online_pipeline.query_preparation.translate_vi_to_en", return_value=EN)
+    def test_english_also_uses_existing_translator(self, translate):
+        self.assertEqual(prepare_english(EN, None)["english"], [EN])
+        translate.assert_called_once_with(EN)
 
-    def test_local_translation_used_and_reported(self):
-        model = SimpleNamespace(model=True, expand=lambda _: [EN, "Bicycle race", "dusty road"])
-        plan = prepare_english(VI, model)
-        self.assertEqual(plan["source"], "local_llm")
-        self.assertEqual(plan["english"][0], EN)
+    @patch("src.online_pipeline.query_preparation.translate_vi_to_en")
+    def test_optional_expansion_applies_to_both_languages(self, translate):
+        for query in [VI, EN]:
+            model = SimpleNamespace(expand=lambda _: [EN, "Bicycle race", "dusty road"])
+            plan = prepare_english(query, model)
+            self.assertEqual(plan["source"], "local_llm")
+            self.assertEqual(plan["english"][0], EN)
+        translate.assert_not_called()
 
-    def test_invalid_local_output_and_exception_block_search(self):
-        for values in [[VI], [], [""]]:
-            with self.assertRaises(QueryPreparationError):
-                prepare_english(VI, SimpleNamespace(model=True, expand=lambda _: values))
+    @patch("src.online_pipeline.query_preparation.translate_vi_to_en", return_value=EN)
+    def test_failed_or_empty_expansion_falls_back(self, translate):
         def failure(_):
             raise RuntimeError("GPU error")
-        with self.assertRaises(QueryPreparationError):
-            prepare_english(VI, SimpleNamespace(model=True, expand=failure))
+        for expand in [failure, lambda _: []]:
+            plan = prepare_english(VI, SimpleNamespace(expand=expand))
+            self.assertEqual(plan["english"], [EN])
+            self.assertEqual(plan["source"], "translator")
+
+    @patch("src.online_pipeline.query_preparation.translate_vi_to_en", side_effect=RuntimeError("offline"))
+    def test_failed_translation_keeps_main_fallback(self, translate):
+        plan = prepare_english(VI, None)
+        self.assertEqual(plan["english"], [VI])
+        self.assertEqual(plan["source"], "original")
 
     def test_chunks_keep_last_number_and_branch_weights(self):
         encoder = SimpleNamespace(text_context_length=7, text_token_count=lambda text: len(text.split()) + 2)
