@@ -133,6 +133,8 @@ function createPagnitionImageDiv(result, index) {
     `;
 
     const img = div.querySelector('img');
+    img.resultEntity = result.entity;
+    registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
     img.setAttribute('draggable', 'true');
     img.addEventListener('dragstart', drag);
 
@@ -143,7 +145,7 @@ function createPagnitionImageDiv(result, index) {
             event.preventDefault(); // Prevent default middle-click behavior
             const frameId = result.entity.frame_id;
             const imagePath = img.dataset.src;
-            addImageToExportArea(frameId, imagePath, frameInfo);
+            pinImage(img);
         }
     });
 
@@ -152,7 +154,7 @@ function createPagnitionImageDiv(result, index) {
     exportIcon.addEventListener('click', () => {
         const imagePath = img.dataset.src;
         const frameId = result.entity.frame_id;
-        addImageToExportArea(frameId, imagePath, frameInfo);
+        pinImage(img);
     });
 
     
@@ -173,6 +175,8 @@ function updatePagnitionRightPanel_list(results, page) {
 
         // Observe the image for lazy-loading
         const img = div.querySelector('img');
+    img.resultEntity = result.entity;
+    registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
         imageObserver.observe(img);
 
         return div;

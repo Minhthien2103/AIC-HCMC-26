@@ -19,6 +19,7 @@ class QueryExpander:
         self.tokenizer = None
         self.model = None
         self.cache = {}
+        self.load_error = None
         self.load_in_4bit = load_in_4bit and (self.device == "cuda")
 
         self._load_model()
@@ -28,10 +29,7 @@ class QueryExpander:
             logger.info(f"Loading local LLM for Query Expansion: {self.model_id} (4-bit={self.load_in_4bit})...")
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-            try:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=True)
-            except Exception:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=False)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, local_files_only=True)
 
             if self.load_in_4bit:
                 bnb_config = BitsAndBytesConfig(
@@ -39,20 +37,10 @@ class QueryExpander:
                     bnb_4bit_quant_type="nf4",
                     bnb_4bit_compute_dtype=torch.float16
                 )
-                try:
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        self.model_id,
-                        quantization_config=bnb_config,
-                        device_map="cuda",
-                        local_files_only=True
-                    )
-                except Exception:
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        self.model_id,
-                        quantization_config=bnb_config,
-                        device_map="cuda",
-                        local_files_only=False
-                    )
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_id, quantization_config=bnb_config,
+                    device_map="cuda", local_files_only=True
+                )
             else:
                 dtype = torch.bfloat16 if self.device == "cpu" else torch.float16
                 self.model = AutoModelForCausalLM.from_pretrained(
@@ -66,7 +54,8 @@ class QueryExpander:
             self.model.eval()
             logger.info("QueryExpander LLM loaded successfully.")
         except Exception as e:
-            logger.warning(f"Failed to load QueryExpander LLM ({e}). Will use fallback translation.")
+            self.load_error = str(e)
+            logger.warning(f"Local QueryExpander unavailable ({e}). Vietnamese search will require a working local model; English remains available.")
             self.model = None
 
     def expand(self, query: str) -> List[str]:
@@ -79,10 +68,7 @@ class QueryExpander:
             return self.cache[clean_q]
 
         if self.model is None or self.tokenizer is None:
-            # Fallback to direct translation
-            from src.utils.translation import translate_vi_to_en
-            trans = translate_vi_to_en(clean_q)
-            return [trans] if trans else [clean_q]
+            raise RuntimeError(self.load_error or "Local translation model is not loaded")
 
         prompt = f"""You are an expert video retrieval query optimizer for text-to-video search.
 Task:
@@ -122,9 +108,4 @@ English Visual Descriptions:"""
         except Exception as e:
             logger.warning(f"Error during LLM expansion for '{clean_q}': {e}")
 
-        # Fallback if generation failed
-        from src.utils.translation import translate_vi_to_en
-        fallback = translate_vi_to_en(clean_q)
-        res = [fallback] if fallback else [clean_q]
-        self.cache[clean_q] = res
-        return res
+        raise RuntimeError("Local query expansion did not produce usable output")

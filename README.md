@@ -196,6 +196,14 @@ Tải bộ file chỉ mục đã được tính toán sẵn và đặt vào đú
 ---
 
 ### Bước 3.4: Mở kết nối SSH Tunnel tải ảnh Keyframe (PowerShell)
+
+Frontend và backend đều dùng **`localhost:8007`** cho media. Sau khi đóng các
+cửa sổ SSH, phải mở lại tunnel. Không đổi `MEDIA_BASE` sang 8008 chỉ để thử
+server Range; xem [hướng dẫn media server](scripts/MEDIA_SERVER.md).
+
+Để kiểm tra tunnel sau khi mở: truy cập `http://localhost:8007/`.
+Nếu web 8006 mở được nhưng ảnh/video mất, kiểm tra tunnel này trước.
+
 Mở một cửa sổ **PowerShell** trên máy bạn và chạy lệnh sau để dẫn luồng ảnh từ Server Ubuntu (`192.168.28.112:8007`) về máy `localhost:8007`:
 
 ```powershell
@@ -207,6 +215,29 @@ ssh -N -L 8007:localhost:8007 team12@192.168.28.112
 ---
 
 ### Bước 3.5: Khởi động Hệ thống & Mở Web UI (Chỉ duy nhất 1 lệnh trên CMD)
+
+**Truy vấn Việt/Anh trên nhánh `test`:** tiếng Anh được giữ nguyên; tiếng Việt
+có dấu cần mô hình Qwen local hoạt động. Luồng tìm kiếm text không âm thầm gọi
+Google hay đưa tiếng Việt vào SigLIP khi dịch lỗi. Nếu thiếu model, web báo lỗi;
+có thể dùng truy vấn tiếng Anh trong lúc chuẩn bị model local.
+
+Sau khi tìm, mở **Truy vấn thực tế dùng để tìm** dưới nút tìm kiếm để xem nguồn
+dịch, từng đoạn tiếng Anh và số token. Mô tả dài được chia thành nhiều đoạn
+theo giới hạn tokenizer, rồi hợp nhất thứ hạng; chi tiết cuối không bị cắt bỏ
+chỉ vì vượt context length. Kiểm tra bản dịch và sửa trực tiếp ô mô tả nếu cần.
+`GET /config` cũng trả trạng thái `translation.ready` và `translation.load_error`.
+
+Model local cần đủ **trọng số**, không chỉ các file tokenizer. Nếu đã đồng ý tải
+model từ Hugging Face, có thể chuẩn bị một lần trong đúng môi trường Conda:
+
+```cmd
+python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-3B-Instruct')"
+```
+
+Lệnh này tải model dung lượng nhiều GB, không gửi câu truy vấn; bước chuẩn bị
+model không được tự chạy bởi backend. Sau đó khởi động bằng `--llm 3b` và kiểm
+tra log `QueryExpander LLM loaded successfully`. Việc dịch/inference chạy local.
+Nếu dùng cache khác mặc định, chuẩn bị và chạy backend với cùng `HF_HOME`.
 Server backend đã được tích hợp sẵn toàn bộ API, nạp các mô hình AI và **tự động mount toàn bộ giao diện Web UI**. Bạn chỉ cần mở **duy nhất 1 cửa sổ CMD**:
 
 ```cmd
@@ -231,6 +262,18 @@ python src/server.py --port 8006 --llm 3b --vlm 2b
 ---
 
 ### Bước 3.6: Các Website nộp bài thi (Submission Portals)
+
+**KIS/QA trên nhánh `test`:** sau khi cập nhật, khởi động lại backend bằng
+`python src/server.py --port 8006`, nhấn **Ctrl+F5** rồi tìm và ghim lại frame.
+Không cần đổi cổng media cho thay đổi QA. Timeline lấy ánh xạ từ endpoint
+`/frame-mapping/{video_id}` trên backend, cùng metadata với kết quả tìm kiếm.
+
+- Chọn **KIS-QA**, ghim frame rồi nhập đáp án ở ô bên dưới trong Export Area.
+- Chỉ frame đầu tiên được nộp; đáp án gắn với đúng video/keyframe/thời gian.
+- Đáp án là chuỗi chữ số, không rỗng; giữ số 0 ở đầu (ví dụ `007`).
+- Theo thể lệ được cung cấp, QA gửi `<ANSWER>-<VIDEO_ID>-<TIME(ms)>`, không có tiền tố `QA-`.
+- Thiếu thời gian hoặc metadata hợp lệ sẽ chặn nộp, không đoán từ nhãn ảnh.
+- Các máy chia sẻ frame qua WebSocket cần cùng tải bản frontend mới.
 
 Hệ thống hỗ trợ nộp bài tự động qua API DRES hoặc xuất kết quả thủ công lên cổng thi đấu:
 

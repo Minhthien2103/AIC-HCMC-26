@@ -55,19 +55,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let socket_share;
 
-function sendVqaInputUpdate(frameId, vqaInput) {
-    if (socket_share && socket_share.readyState === WebSocket.OPEN) {
-        const message = JSON.stringify({
-            type: 'vqa_input_update',
-            frameId: frameId,
-            vqaInput: vqaInput
-        });
-        socket_share.send(message);
-    } else {
-        console.error('WebSocket is not open. Unable to send VQA input update.');
-    }
-}
-
 function connectWebSocketcrossing() {
   socket_share = new WebSocket(`${getBackendWs()}/ws/share_image`);
   
@@ -75,27 +62,7 @@ function connectWebSocketcrossing() {
     console.log('Share WebSocket connection established');
   };
 
-  socket_share.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      
-      if (data.type === 'image_share') {
-        if (data.frameId && data.src && data.frameInfo) {
-          addImageToExportArea(data.frameId, data.src, data.frameInfo, false);
-        } else {
-          console.error("Received image data does not contain expected properties:", data);
-        }
-      } else if (data.type === 'vqa_input_update') {
-        if (data.frameId && data.vqaInput !== undefined) {
-          updateVqaInput(data.frameId, data.vqaInput);
-        } else {
-          console.error("Received VQA input update does not contain expected properties:", data);
-        }
-      }
-    } catch (error) {
-      console.error("Error parsing received data:", error);
-    }
-  };
+  socket_share.onmessage = event => handleSharedExportMessage(event);
 
   socket_share.onerror = (error) => {
     console.error('WebSocket error:', error);

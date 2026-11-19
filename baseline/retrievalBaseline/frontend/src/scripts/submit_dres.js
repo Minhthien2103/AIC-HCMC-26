@@ -302,37 +302,11 @@ async function submit_to_dres_v2() {
     const firstItem = exportedImages[0];
     console.log("[DRES] Frame to submit from Export Area:", firstItem);
 
-    let rawVideo = "";
-    let sec = 0;
-
-    if (firstItem.frameInfo && firstItem.frameInfo.includes('-')) {
-        const parts = firstItem.frameInfo.split('-');
-        rawVideo = parts[0].trim();
-        const parsedSec = parseFloat(parts[1]);
-        if (!isNaN(parsedSec)) {
-            sec = parsedSec;
-        }
-    }
-
-    if (!rawVideo && firstItem.videoFramePart) {
-        rawVideo = firstItem.videoFramePart.split('/')[0].trim();
-    }
-
-    if (sec === 0 && firstItem.frameId !== undefined && firstItem.frameId !== null) {
-        const parsedSec = parseFloat(firstItem.frameId);
-        if (!isNaN(parsedSec)) {
-            sec = parsedSec;
-        }
-    }
-
-    // Tự động cắt bỏ phần mở rộng như .mp4, .mkv theo đúng quy chế BTC
-    const videoId = rawVideo.replace(/\.(mp4|mkv|avi|webm)$/i, '').trim();
-    const ms = Math.round(sec * 1000.0);
-
-    if (!videoId) {
-        alert("❌ Lỗi: Không thể nhận diện Video ID từ frame đã chọn!");
-        return;
-    }
+    let selectedFrame;
+    try { selectedFrame = normalizePinnedFrame(firstItem); }
+    catch (error) { showTemporaryAlert(error.message, 'warning'); return; }
+    const videoId = selectedFrame.videoId;
+    const ms = Math.round(selectedFrame.timeSeconds * 1000);
 
     // 4. Xác định Task hiện tại (KIS / Q&A / TRAKE)
     let currentTask = "kis";
@@ -345,40 +319,16 @@ async function submit_to_dres_v2() {
 
     let body = {};
 
-    if (currentTask === "kis" || currentTask === "kis-v") {
-        // KIS-T / KIS-V: Định dạng Video ID + start ms = end ms
-        body = {
-            "answerSets": [{
-                "answers": [{
-                    "mediaItemName": videoId,
-                    "start": ms,
-                    "end": ms
-                }]
-            }]
-        };
-    } else if (currentTask === "vqa" || currentTask === "qa" || currentTask === "kis-qa") {
-        // Q&A: Định dạng QA-<ANSWER>-<VIDEO_ID>-<TIME(ms)>
-        let answerText = "";
-        const vqaInput = document.querySelector(".vqa-input");
-        if (vqaInput && vqaInput.value.trim() !== "") {
-            answerText = vqaInput.value.trim();
-        } else {
-            answerText = prompt(`[Q&A] Nhập câu trả lời (Answer Text) cho video ${videoId} tại ${(ms/1000).toFixed(2)}s:`, "");
-            if (answerText === null) {
-                showTemporaryAlert("Đã hủy nộp Q&A.", "info");
-                return;
-            }
-            answerText = answerText.trim();
+    if (['kis', 'kis-v', 'qa', 'vqa', 'kis-qa'].includes(currentTask)) {
+        try {
+            body = buildKisQaBody(selectedFrame, currentTask, vqaInputs[selectedFrame.key]);
+        } catch (error) {
+            showTemporaryAlert(error.message, 'warning');
+            const input = Array.from(document.querySelectorAll('.vqa-input'))
+                .find(element => element.dataset.frameKey === selectedFrame.key);
+            input?.focus();
+            return;
         }
-
-        const qaString = `QA-${answerText}-${videoId}-${ms}`;
-        body = {
-            "answerSets": [{
-                "answers": [{
-                    "text": qaString
-                }]
-            }]
-        };
     } else if (currentTask === "trake") {
         // TRAKE: Định dạng TR-<VIDEO_ID>-<FRAME_ID1>,<FRAME_ID2>,...
         const matchingFrames = exportedImages

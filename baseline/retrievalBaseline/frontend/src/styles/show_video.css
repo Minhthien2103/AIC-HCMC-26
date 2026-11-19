@@ -12,23 +12,34 @@
 }
 .Details .details_bg{
     display: flex;
+    flex-direction: column;
     position: fixed;
     overflow: auto;
-    background-color: aliceblue;
+    background-color: #181818;
     border-radius: 5px;
     border: 1px solid #ddd;
     height: 490px;
     width: 700px;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     right: 0;
+    box-sizing: border-box;
+    padding: 36px 12px 60px;
+    gap: 8px;
 }
 
 .Details .details_bg .vid_details{
-    margin: auto;
+    margin: 0;
     display: block;
-    width: 695px;
+    width: 100%;
+    min-height: 0;
+    flex: 1;
+    background: black;
+    object-fit: contain;
 }
+
+#video-status { color: white; font-size: 14px; }
+#video-direct-link { color: #9acbff; font-size: 14px; }
 .Details .details_bg .close{
     position: absolute;
     top: 0;
