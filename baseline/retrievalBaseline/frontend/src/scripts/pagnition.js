@@ -175,8 +175,6 @@ function updatePagnitionRightPanel_list(results, page) {
 
         // Observe the image for lazy-loading
         const img = div.querySelector('img');
-    img.resultEntity = result.entity;
-    registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
         imageObserver.observe(img);
 
         return div;
