@@ -97,12 +97,12 @@ class VQAQueryRequest(BaseModel):
 def resolve_llm_model(model_name_or_alias: Optional[str]) -> str:
     """Resolve shortcut aliases ('3b', '4b') to full HuggingFace model IDs."""
     if not model_name_or_alias:
-        return getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B")
+        return getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B-Instruct-2507")
     alias = str(model_name_or_alias).strip().lower()
     if alias in ("3b", "3", "qwen-3b", "qwen2.5-3b", "qwen2.5-3b-instruct"):
         return "Qwen/Qwen2.5-3B-Instruct"
     elif alias in ("4b", "4", "qwen-4b", "qwen3-4b"):
-        return "Qwen/Qwen3-4B"
+        return "Qwen/Qwen3-4B-Instruct-2507"
     return str(model_name_or_alias).strip()
 
 
@@ -157,7 +157,7 @@ class SearchService:
         # Initialize Local LLM Query Expander (Loads ONLY the chosen model: 3B or 4B)
         if getattr(config, "ENABLE_LLM_EXPANSION", True):
             try:
-                selected_llm = resolve_llm_model(llm_model or getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B"))
+                selected_llm = resolve_llm_model(llm_model or getattr(config, "LLM_MODEL_ID", "Qwen/Qwen3-4B-Instruct-2507"))
                 llm_device = getattr(config, "LLM_DEVICE", "cuda")
                 logger.info(f"Using Query Expander SLM: {selected_llm} on {llm_device}")
                 self.expander = QueryExpander(
@@ -885,7 +885,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8006, help="Port (default: 8006)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    parser.add_argument("--llm", type=str, default="3b", help="Chọn mô hình SLM: '3b' (Qwen2.5-3B) hoặc '4b' (Qwen3-4B). Mặc định: '3b'")
+    parser.add_argument("--llm", type=str, default=None, help="SLM: '4b' (Qwen3-4B-Instruct-2507), '3b' (Qwen2.5-3B), hoặc model ID. Mặc định theo AIC_LLM_MODEL/config (4B-Instruct).")
     parser.add_argument("--vlm", type=str, default="3b", help="Chọn mô hình VLM: '3b' (Qwen2.5-VL-3B), '2b' (Qwen2-VL-2B), '7b'. Mặc định: '3b'")
     args = parser.parse_args()
 

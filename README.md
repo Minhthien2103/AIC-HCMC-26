@@ -96,8 +96,8 @@ flowchart TD
     ParallelStep --> OCRBranch["OCR nhập tay (cách nhau dấu phẩy) hoặc Deterministic Regex"]
     OCRBranch --> OCRSearch["TextSearchEngine (indexes/ocr_text.parquet)"]
     
-    ParallelStep --> SLMBranch["Qwen2.5-3B-Instruct 4-bit (Sửa lỗi Telex & Mở rộng 3 prompt)"]
-    SLMBranch --> QueryVariants["Dịch sát nghĩa theo ngữ cảnh / Chủ thể & Hành động / Từ khóa hình ảnh"]
+    ParallelStep --> SLMBranch["Qwen3-4B-Instruct-2507 4-bit (Dịch theo ngữ cảnh)"]
+    SLMBranch --> QueryVariants["Giữ cố định bản dịch chính → Sinh 2 diễn đạt phụ"]
     QueryVariants --> SigLIPText["SigLIP Text Encoder (Batch 3 nhánh)"]
     SigLIPText --> TextSearch["FAISS Batch Search (Tìm riêng từng nhánh)"]
     TextSearch --> RRF["Weighted RRF: 0.7 / 0.2 / 0.1 → Điểm 0–1"]
@@ -122,7 +122,7 @@ flowchart TD
 
 ---
 
-- **Multi-Query Retrieval:** SLM sinh 3 nhánh trong một lượt; nhánh chính dịch theo ngữ cảnh. SigLIP encode và FAISS tìm theo batch, gộp Weighted RRF với trọng số **0.7 / 0.2 / 0.1** (`k = 60`).
+- **Multi-Query Retrieval:** Qwen3-4B-Instruct dịch tự động theo ngữ cảnh, giữ cố định bản dịch chính rồi sinh 2 diễn đạt phụ; có gợi ý thuật ngữ liên quan như “con lân”, “áo dài”. SigLIP/FAISS chạy batch, gộp Weighted RRF **0.7 / 0.2 / 0.1** (`k = 60`); lỗi sinh nhánh phụ thì dùng bản dịch chính.
 - **OCR Soft Boost:** Nhập `115, ambulance` để khớp bất kỳ cụm nào; để trống dùng Regex. Chỉ cộng điểm một lần cho frame đã có trong kết quả; với Multi-Event, OCR áp dụng cho ảnh sự kiện đầu tiên.
 - **Điểm thống nhất 0–1:** Chuẩn hóa RRF, cosine và điểm Multi-Event trước khi kết hợp. Khi dùng OCR: `S = (điểm nền + 0.35 × khớp) / 1.35`; VLM: `0.35 × S + 0.65 × (điểm VLM / 10)`.
 - **Frame đa dạng:** Nút Rerank chọn tối đa **20 frame từ Top 100**; bỏ qua frame cùng video khi vừa gần **≤ 3 giây**, vừa giống **cosine ≥ 0.97**; khác cảnh hoặc cách xa vẫn được giữ.
@@ -217,17 +217,17 @@ cd /d d:\STUDY\BIN\CS\PROJECT\AIC-HCMC-26
 conda activate aic26
 # HOẶC nếu dùng uv: aic26\Scripts\activate.bat
 
-# Chạy server (mặc định dùng SLM Qwen2.5-3B và VLM Qwen2.5-VL-3B):
+# Chạy server (mặc định dùng SLM Qwen3-4B-Instruct-2507 và VLM Qwen2.5-VL-3B):
 python src/server.py --port 8006
 
-# Tùy chọn đổi SLM sang 4B:
-python src/server.py --port 8006 --llm 4b
+# Tùy chọn đổi SLM sang 3B:
+python src/server.py --port 8006 --llm 3b
 
 # Tùy chọn cấu hình cả SLM và VLM (3b / 2b / 7b):
 python src/server.py --port 8006 --llm 3b --vlm 2b
 ```
 
-👉 Sau khi terminal hiện `Uvicorn running on http://0.0.0.0:8006`, mở trình duyệt web truy cập ngay địa chỉ: **`http://localhost:8006`** để bắt đầu thi đấu!
+👉 Sau khi terminal hiện `Uvicorn running on http://0.0.0.0:8006`, mở trình duyệt web truy cập ngay địa chỉ: **`http://localhost:8006/`** để bắt đầu thi đấu!
 
 ---
 
@@ -254,15 +254,15 @@ Hệ thống hỗ trợ nộp bài tự động qua API DRES hoặc xuất kết
 | Mô hình | Trọng số / Checkpoint | Chế độ chạy | VRAM tiêu thụ | Vai trò trong hệ thống & Tùy chọn CLI |
 |---|---|---|---|---|
 | **Google SigLIP** | `ViT-SO400M-14-SigLIP` (webli) | FP16 trên GPU | ~1.5 GB | Trích xuất đặc trưng hình ảnh và văn bản đa ngôn ngữ (1152-dim). |
-| **Qwen2.5-3B** *(Mặc định)* | `Qwen/Qwen2.5-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.05 GB | SLM Mở rộng query SOTA chuẩn xác (< 0.2s trên GPU). Bật bằng: `--llm 3b`. |
-| **Qwen3-4B** *(Tùy chọn)* | `Qwen/Qwen3-4B` | 4-bit (`nf4` BnB) | ~2.5 GB | SLM Mở rộng query thay thế. Bật bằng: `--llm 4b`. |
+| **Qwen2.5-3B** *(Đối chứng)* | `Qwen/Qwen2.5-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.05 GB | Model cũ, đã ghi nhận lỗi dịch thuật ngữ. Bật bằng: `--llm 3b`. |
+| **Qwen3-4B-Instruct-2507** *(Mặc định)* | `Qwen/Qwen3-4B-Instruct-2507` | 4-bit (`nf4` BnB) | Đo theo pipeline | Dịch riêng, cố định câu chính rồi mở rộng; không thinking. Bật bằng: `--llm 4b`. |
 | **Qwen2.5-VL-3B** *(Mặc định)* | `Qwen/Qwen2.5-VL-3B-Instruct` | 4-bit (`nf4` BnB) | ~2.1 GB | VLM Reranker Top-20 SOTA & KIS-QA (~0.8s). Bật bằng: `--vlm 3b`. |
 | **Qwen2-VL-2B** *(Tùy chọn)* | `Qwen/Qwen2-VL-2B-Instruct` | 4-bit (`nf4` BnB) | ~1.5 GB | VLM Reranker siêu nhẹ cho máy tiết kiệm VRAM. Bật bằng: `--vlm 2b`. |
 | **Qwen2-VL-7B** *(Tùy chọn)* | `Qwen/Qwen2-VL-7B-Instruct` | 4-bit (`nf4` BnB) | ~4.5 GB | VLM Reranker bản lớn (cần máy >12GB VRAM nếu chạy cùng SLM). Bật bằng: `--vlm 7b`. |
 | **EasyOCR** | PyTorch Native (vi, en) | CUDA FP16 | ~1.2 GB *(Offline)* | Quét nhận diện chữ viết, biển số xe, số hiệu trên keyframe. |
 
 #### Các tổ hợp mô hình đề xuất trên RTX 4060 (8 GB VRAM):
-- **Cấu hình 1 (Mặc định - Cân bằng tối ưu):** `python src/server.py --port 8006 --llm 4b --vlm 3b` *(Tổng VRAM: ~6.6 GB / 8.0 GB)*
+- **Cấu hình 1 (Mặc định):** `python src/server.py --port 8006 --llm 4b --vlm 3b` *(Cần đo VRAM đỉnh khi chạy cả tìm kiếm và rerank.)*
 - **Cấu hình 2 (Nhanh & Nhẹ):** `python src/server.py --port 8006 --llm 3b --vlm 3b` *(Tổng VRAM: ~6.15 GB / 8.0 GB)*
 - **Cấu hình 3 (Siêu tiết kiệm VRAM):** `python src/server.py --port 8006 --llm 3b --vlm 2b` *(Tổng VRAM: ~5.55 GB / 8.0 GB)*
 
@@ -274,7 +274,7 @@ AIC-HCMC-26/
 │   ├── config.py                         # Cấu hình tập trung đường dẫn, model, trọng số
 │   ├── server.py                         # Backend FastAPI & WebSocket điều phối tìm kiếm
 │   ├── online_pipeline/
-│   │   ├── query_expander.py             # Sửa lỗi chính tả & mở rộng query (Qwen2.5-3B)
+│   │   ├── query_expander.py             # Dịch rồi mở rộng query (Qwen3-4B-Instruct)
 │   │   ├── query_encoder.py              # Mã hóa SigLIP Text/Image vector (1152-dim)
 │   │   ├── retrieval.py                  # Công cụ truy xuất FAISS & kết hợp metadata Polars
 │   │   ├── text_search.py                # Công cụ tìm kiếm OCR & trích xuất Regex cứng

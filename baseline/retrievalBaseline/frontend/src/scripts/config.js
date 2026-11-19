@@ -16,8 +16,8 @@ window.CONFIG = {
   // LAN Server: "http://192.168.20.150:8080" or "http://192.168.20.150"
   // UIT Contest server: "https://aiclub.uit.edu.vn/dres"
   DRES_BASE: "https://aiclub.uit.edu.vn/dres",
-  DRES_EVALUATION_ID: "bcb482c6-2b9e-4908-877a-e5ccd7c04640",
-  DRES_SESSION_ID: "q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P",
+  DRES_EVALUATION_ID: "675a3430-abaa-4d8c-b650-c8db1246d429",
+  DRES_SESSION_ID: "AlUHzp2QiqjhGxRY5pWP9kDbdVH9PKvY",
 
   // Default image format extension: '.jpg' (AIC dataset standard) or '.webp'
   IMAGE_EXT: ".jpg"
@@ -29,4 +29,14 @@ window.BACKEND_WS = window.CONFIG.BACKEND_WS;
 window.MEDIA_BASE = window.CONFIG.MEDIA_BASE;
 window.DRES_BASE = window.CONFIG.DRES_BASE;
 
-console.log("[CONFIG] System configuration loaded:", window.CONFIG);
+// Replace only the known stale contest settings; preserve other saved sessions.
+try {
+  if (localStorage.getItem('evaluationID') === "bcb482c6-2b9e-4908-877a-e5ccd7c04640") {
+    localStorage.setItem('evaluationID', window.CONFIG.DRES_EVALUATION_ID);
+  }
+  if (localStorage.getItem('contestSessionID') === "q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P") {
+    localStorage.setItem('contestSessionID', window.CONFIG.DRES_SESSION_ID);
+  }
+} catch (error) {
+  console.warn('[CONFIG] Browser storage unavailable');
+}

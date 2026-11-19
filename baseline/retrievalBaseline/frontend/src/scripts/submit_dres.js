@@ -50,6 +50,17 @@ function showTemporaryAlert(message, type = 'info') {
 // DRES Configuration Helpers
 // ------------------------------------------------------------------------------
 
+async function readDresResponse(response) {
+    const text = await response.text();
+    if (!text.trim()) return {};
+    try {
+        const value = JSON.parse(text);
+        return value && typeof value === 'object' ? value : { message: String(value) };
+    } catch {
+        return { message: text };
+    }
+}
+
 function getDresBaseUrl() {
     return localStorage.getItem('dresHost') || 
            (window.CONFIG && window.CONFIG.DRES_BASE) || 
@@ -59,13 +70,13 @@ function getDresBaseUrl() {
 function getDresEvaluationId() {
     return localStorage.getItem('evaluationID') || 
            (window.CONFIG && window.CONFIG.DRES_EVALUATION_ID) || 
-           "bcb482c6-2b9e-4908-877a-e5ccd7c04640";
+           "675a3430-abaa-4d8c-b650-c8db1246d429";
 }
 
 function getDresSessionId() {
     return localStorage.getItem('contestSessionID') || 
            (window.CONFIG && window.CONFIG.DRES_SESSION_ID) || 
-           "q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P";
+           "AlUHzp2QiqjhGxRY5pWP9kDbdVH9PKvY";
 }
 
 function updateDresStatusBadge() {
@@ -413,7 +424,7 @@ async function submit_to_dres_v2() {
 
     const contestURL = `${dresBase}/api/v2/submit/${evaluationId}?session=${sessionId}`;
 
-    console.log("[DRES Submit] Target URL:", contestURL);
+    console.log("[DRES Submit] Target URL:", `${dresBase}/api/v2/submit/${evaluationId}`);
     console.log("[DRES Submit] Payload:", JSON.stringify(body, null, 2));
 
     showTemporaryAlert(`⏳ Đang nộp [${currentTask.toUpperCase()}]: ${videoId} (${(ms/1000).toFixed(2)}s)...`, "info");
@@ -436,14 +447,9 @@ async function submit_to_dres_v2() {
             body: JSON.stringify(body)
         });
 
+        const data = await readDresResponse(response);
         if (!response.ok) {
-            let errorDetail = `HTTP ${response.status}`;
-            try {
-                const errJson = await response.json();
-                errorDetail = errJson.description || errJson.message || errorDetail;
-            } catch (e) {
-                errorDetail = await response.text();
-            }
+            const errorDetail = data.description || data.message || `HTTP ${response.status}`;
 
             if (response.status === 412) {
                 showTemporaryAlert("⚠️ Lỗi 412: Nộp trùng với kết quả vừa nộp hoặc thời gian làm bài của task đã hết!", "warning");
@@ -463,7 +469,6 @@ async function submit_to_dres_v2() {
             return;
         }
 
-        const data = await response.json();
         console.log("[DRES Submit Success]", data);
 
         const verdict = String(data.submission || data.status || "").toUpperCase();
@@ -484,7 +489,7 @@ async function submit_to_dres_v2() {
     } catch (err) {
         console.error("[DRES Submit Network Error]", err);
         showTemporaryAlert(`❌ Lỗi kết nối DRES: ${err.message}`, "error");
-        alert(`❌ Không thể kết nối tới máy chủ DRES:\n${err.message}\n\nEndpoint hiện tại: ${contestURL}\n\nHãy kiểm tra:\n1. Đã kết nối OpenVPN chưa?\n2. IP máy chủ (${dresBase}) có đúng không? Bấm nút 'DRES Login' để đổi IP.`);
+        alert(`❌ Không thể kết nối tới máy chủ DRES:\n${err.message}\n\nEndpoint hiện tại: ${dresBase}/api/v2/submit/${evaluationId}\n\nHãy kiểm tra:\n1. Đã kết nối OpenVPN chưa?\n2. IP máy chủ (${dresBase}) có đúng không? Bấm nút 'DRES Login' để đổi IP.`);
     } finally {
         isSubmitting = false;
         if (submitBtn) {

@@ -1,16 +1,17 @@
 import logging
-import re
 from typing import List
 import torch
+from src.online_pipeline.query_translation import (translation_messages, parse_translation,
+                                                    expansion_messages, parse_expansions)
 
 logger = logging.getLogger(__name__)
 
 class QueryExpander:
-    """Multi-query expansion and typo correction using local Qwen2.5-3B-Instruct."""
+    """Translate first, then expand with a frozen primary query using a local SLM."""
 
     def __init__(
         self,
-        model_id: str = "Qwen/Qwen2.5-3B-Instruct",
+        model_id: str = "Qwen/Qwen3-4B-Instruct-2507",
         device: str = "cuda",
         load_in_4bit: bool = True
     ):
@@ -69,62 +70,45 @@ class QueryExpander:
             logger.warning(f"Failed to load QueryExpander LLM ({e}). Will use fallback translation.")
             self.model = None
 
-    def expand(self, query: str) -> List[str]:
-        """Expand a raw Vietnamese or English query into 3 distinct visual search prompts."""
-        if not query or not query.strip():
-            return []
+    def _generate(self, messages, max_new_tokens=192):
+        chat_text = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        inputs = self.tokenizer([chat_text], return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            output = self.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+        generated = output[0][inputs.input_ids.shape[1]:]
+        # A truncated JSON response must never become a primary query.
+        if len(generated) >= max_new_tokens:
+            raise ValueError("SLM response exceeded token budget")
+        return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
 
+    def expand(self, query: str) -> List[str]:
+        """Return a contextual translation followed by up to two paraphrases."""
         clean_q = query.strip()
+        if not clean_q:
+            return []
         if clean_q in self.cache:
             return self.cache[clean_q]
 
-        if self.model is None or self.tokenizer is None:
-            # Fallback to direct translation
+        primary = None
+        if self.model is not None and self.tokenizer is not None:
+            try:
+                primary = parse_translation(self._generate(translation_messages(clean_q)), clean_q)
+            except Exception as exc:
+                logger.warning("Primary translation failed: %s", exc)
+
+        if primary is None:
             from src.utils.translation import translate_vi_to_en
-            trans = translate_vi_to_en(clean_q)
-            return [trans] if trans else [clean_q]
+            translated = translate_vi_to_en(clean_q)
+            primary = translated.strip() if translated and translated.strip() else clean_q
+            # Do not cache transient fallback errors or expand an unverified fallback.
+            return [primary]
 
-        prompt = f"""You are an expert video retrieval query optimizer for text-to-video search.
-Task:
-1. Carefully detect and correct any typos, wrong tone marks, or phonetic misspellings in the user query (for example: "tay đưa xe đạp" -> "tay đua xe đạp" / cyclist, "ngừoi" -> "người", "xe dap" -> "xe đạp").
-2. Translate and generate exactly 3 distinct English visual search descriptions tailored for SigLIP/CLIP keyframe retrieval:
-   - Line 1: Faithful, natural English translation preserving ALL explicit constraints, actions, relationships, negations, numbers and colors. Translate meaning in context, NEVER word by word. Vietnamese "tay đua xe đạp" means "cyclist" or "bicycle racer", NEVER "hand racing cycle"; "tay" here refers to a person, not a body part. If already English, preserve its meaning.
-   - Line 2: Subject and core action focused
-   - Line 3: Key objects, colors, and visual tags comma-separated
-3. All three lines must use ONLY information in the input. Do not invent setting, clothing, objects, actions, or visible text. Line 1 is the authoritative query, not a creative expansion.
-
-Output format: Output ONLY the 3 English lines, one per line. No numbering, no prefixes, no explanation, no Vietnamese.
-
-User Query: "{clean_q}"
-English Visual Descriptions:"""
-
+        results = [primary]
         try:
-            messages = [{"role": "user", "content": prompt}]
-            chat_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = self.tokenizer([chat_text], return_tensors="pt").to(self.device)
-
-            with torch.inference_mode():
-                out = self.model.generate(**inputs, max_new_tokens=192, do_sample=False)
-
-            raw_resp = self.tokenizer.batch_decode([out[0][len(inputs.input_ids[0]):]], skip_special_tokens=True)[0]
-            lines = []
-            for line in raw_resp.strip().split("\n"):
-                cleaned = line.strip()
-                cleaned = re.sub(r'^(Line\s*\d+:?|\d+[\.\)]|-|\*)\s*', '', cleaned, flags=re.IGNORECASE).strip()
-                if cleaned and len(cleaned) > 3:
-                    lines.append(cleaned)
-
-            if lines:
-                results = lines[:3]
-                self.cache[clean_q] = results
-                logger.info(f"[Query Expansion] '{clean_q}' -> {results}")
-                return results
-        except Exception as e:
-            logger.warning(f"Error during LLM expansion for '{clean_q}': {e}")
-
-        # Fallback if generation failed
-        from src.utils.translation import translate_vi_to_en
-        fallback = translate_vi_to_en(clean_q)
-        res = [fallback] if fallback else [clean_q]
-        self.cache[clean_q] = res
-        return res
+            results = parse_expansions(self._generate(expansion_messages(primary)), primary)
+        except Exception as exc:
+            logger.warning("Paraphrases failed; keeping primary translation: %s", exc)
+        self.cache[clean_q] = results
+        logger.info("[Query Expansion] %r -> %s", clean_q, results)
+        return results

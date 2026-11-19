@@ -32,16 +32,16 @@
     <!-- <script src="src/critical.js" async></script> -->
     <script>
       function getEvaluationID() {
-        return localStorage.getItem('evaluationID') || (window.CONFIG && window.CONFIG.DRES_EVALUATION_ID) || 'bcb482c6-2b9e-4908-877a-e5ccd7c04640';
+        return localStorage.getItem('evaluationID') || (window.CONFIG && window.CONFIG.DRES_EVALUATION_ID) || '675a3430-abaa-4d8c-b650-c8db1246d429';
       }
       function getContestSessionID() {
-        return localStorage.getItem('contestSessionID') || (window.CONFIG && window.CONFIG.DRES_SESSION_ID) || 'q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P';
+        return localStorage.getItem('contestSessionID') || (window.CONFIG && window.CONFIG.DRES_SESSION_ID) || 'AlUHzp2QiqjhGxRY5pWP9kDbdVH9PKvY';
       }
       function useSessionInfo() {
         const evaluationID = getEvaluationID();
         const contestSessionID = getContestSessionID();
         const userName = localStorage.getItem('userName') || 'Team12';
-        console.log('[Session] User:', userName, 'Evaluation:', evaluationID, 'Session:', contestSessionID);
+        console.log('[Session] User:', userName, 'Evaluation:', evaluationID);
         const userDisplay = document.getElementById('user-name-display');
         if (userDisplay) {
           userDisplay.textContent = userName;
@@ -559,7 +559,7 @@
 
           <div class="dres-form-group">
             <label for="dres-eval-input"><i class="fa fa-trophy"></i> Evaluation ID (ID Đề thi):</label>
-            <input type="text" id="dres-eval-input" value="bcb482c6-2b9e-4908-877a-e5ccd7c04640" placeholder="Evaluation UUID (VD: bcb482c6-2b9e-4908-877a-e5ccd7c04640)">
+            <input type="text" id="dres-eval-input" value="675a3430-abaa-4d8c-b650-c8db1246d429" placeholder="Evaluation UUID (VD: 675a3430-abaa-4d8c-b650-c8db1246d429)">
           </div>
 
           <div class="dres-divider"><span>Cách 1: Đăng nhập tự động với tài khoản Đội thi</span></div>
@@ -583,7 +583,7 @@
 
           <div class="dres-form-group">
             <label for="dres-session-input"><i class="fa fa-id-badge"></i> Session ID:</label>
-            <input type="text" id="dres-session-input" value="q-ekxzxUEkkxlpMwfkdcCvqt4CONUS6P" placeholder="Dán Session ID nếu đã đăng nhập trên trình duyệt">
+            <input type="text" id="dres-session-input" value="AlUHzp2QiqjhGxRY5pWP9kDbdVH9PKvY" placeholder="Dán Session ID nếu đã đăng nhập trên trình duyệt">
             <small class="dres-hint">
               💡 Bạn có thể đăng nhập trên web DRES hoặc portal <a href="https://dres-contestant-portal.pages.dev/" target="_blank" style="color: #38bdf8;">dres-contestant-portal</a> rồi dán Session ID vào đây.
             </small>
@@ -598,7 +598,7 @@
       </div>
     </div>
 
-    <script src="src/scripts/config.js?v=3"></script>
+    <script src="src/scripts/config.js?v=6"></script>
     <script src="src/scripts/filter_get_infor.js?v=3"></script>
     <script src="src/scripts/short_cut.js?v=3"></script>
     <script src="src/scripts/preview.js?v=3"></script>
@@ -615,7 +615,7 @@
     <script src="src/scripts/queries_history.js?v=3"></script>
     <script src="src/scripts/object_list.js?v=3"></script>
     <script src="src/scripts/pagnition.js?v=3"></script>
-    <script src="src/scripts/submit_dres.js?v=3"></script>
+    <script src="src/scripts/submit_dres.js?v=6"></script>
     <script src="src/scripts/query_backend.js?v=4"></script>
   </body>
 </html>
