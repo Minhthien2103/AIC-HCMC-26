@@ -9,7 +9,7 @@ window.CONFIG = {
   // Backend WebSocket endpoint
   BACKEND_WS: "ws://localhost:8006",
 
-  // Remote Media Server (via SSH Tunnel on port 8007)
+  // Media tunnel: keep local port 8007 consistent with the backend and README.
   MEDIA_BASE: "http://localhost:8007",
 
   // DRES Evaluation Server

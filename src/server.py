@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import csv
 import io
 import json
 import logging
@@ -30,7 +31,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
@@ -43,12 +44,12 @@ from src import config
 from src.online_pipeline.score_fusion import weighted_rrf, normalized_score
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.query_expander import QueryExpander
+from src.online_pipeline.query_preparation import QueryPreparationError, prepare_english, prepare_chunks
 from src.online_pipeline.retrieval import RetrievalEngine
 from src.online_pipeline.text_search import TextSearchEngine
 from src.online_pipeline.vlm_reranker import VLMReranker
 from src.tasks.kis_t import KIStask
 from src.tasks.trake import TrakeTask
-from src.utils.translation import translate_vi_to_en
 
 # Configure logging
 logging.basicConfig(
@@ -213,6 +214,8 @@ class SearchService:
             entity_payload: Dict[str, Any] = {
                 "video": v_id,
                 "frame_id": k_name,
+                "keyframe_name": k_name,
+                "original_frame_id": int(cand["frame_id"]) if cand.get("frame_id") is not None else None,
                 "time": pts_time,
                 "path": f"keyframes/{v_id}/{k_name}.jpg"
             }
@@ -239,38 +242,24 @@ class SearchService:
         img_bytes = base64.b64decode(data_url_or_b64)
         return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    def _normalize_query_language(self, text: str) -> str:
-        """Transparently translate Vietnamese query to English for SigLIP embedding."""
-        if not text or not text.strip():
-            return ""
-        try:
-            translated = translate_vi_to_en(text)
-            if translated and translated.strip():
-                return translated.strip()
-        except Exception as e:
-            logger.warning(f"Translation fallback for '{text}': {e}")
-        return text.strip()
-
     def encode_query_variants(self, query: str) -> Tuple[np.ndarray, List[str]]:
         """Encode the faithful primary translation and its supporting variants in one batch."""
         clean_q = query.strip()
         if not clean_q:
             return np.empty((1, config.CLIP_DIM), dtype=np.float32), []
 
-        variations = []
-        if self.expander is not None:
-            try:
-                variations = self.expander.expand(clean_q)
-            except Exception as e:
-                logger.warning(f"Query expansion failed for '{clean_q}': {e}")
-
-        if not variations:
-            trans = self._normalize_query_language(clean_q)
-            variations = [trans] if trans else [clean_q]
-
-        # Preserve branch positions so configured weights retain their meaning.
-        variations = [v.strip() for v in variations if v.strip()][:3]
-        return self.encoder.encode_text_batch(variations), variations
+        if not hasattr(self, "query_preparations"):
+            self.query_preparations = {}
+        if clean_q not in self.query_preparations:
+            plan = prepare_english(clean_q, self.expander)
+            plan = prepare_chunks(plan, self.encoder, config.EXPANSION_WEIGHTS)
+            if len(self.query_preparations) >= 256:
+                self.query_preparations.pop(next(iter(self.query_preparations)))
+            self.query_preparations[clean_q] = plan
+        plan = self.query_preparations[clean_q]
+        logger.info("[Query preparation] source=%s input=%r encoded=%r tokens=%s warnings=%s",
+                    plan["source"], clean_q, plan["chunks"], plan["token_counts"], plan["warnings"])
+        return self.encoder.encode_text_batch(plan["chunks"]), plan["chunks"]
 
     def encode_and_expand_query(self, query: str) -> Tuple[np.ndarray, List[str]]:
         """Compatibility for image blending: use only the faithful primary vector."""
@@ -282,7 +271,7 @@ class SearchService:
         if not variations:
             return []
         rankings = self.retriever.search_batch(vecs, top_k=top_k)
-        return weighted_rrf(rankings, config.EXPANSION_WEIGHTS,
+        return weighted_rrf(rankings, self.query_preparations[query.strip()]["weights"],
                             config.RRF_RANK_CONSTANT)[:top_k]
 
     def apply_ocr_boost(self, candidates: List[Dict[str, Any]], query: str, ocr_text: str = "") -> List[Dict[str, Any]]:
@@ -545,6 +534,10 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
     # Initialize Service EXACTLY ONCE with chosen models
     service = SearchService(llm_model=llm_model, vlm_model=vlm_model)
 
+    @app.exception_handler(QueryPreparationError)
+    async def query_preparation_error(request: Request, error: QueryPreparationError):
+        return JSONResponse(status_code=422, content={"detail": str(error)})
+
     # Active websocket tracking
     active_websockets: List[WebSocket] = []
 
@@ -571,6 +564,23 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
             "metadata_path": str(config.METADATA_PATH),
             "objects_path": str(config.OBJECTS_PATH)
         }
+
+    @app.get("/frame-mapping/{video_id}", response_class=PlainTextResponse)
+    async def frame_mapping(video_id: str):
+        # Serve the same authoritative timestamps as search results. Fetching
+        # CSV directly from the media port requires CORS on that separate server.
+        metadata = service.retriever.meta_df
+        if metadata is None:
+            raise HTTPException(status_code=503, detail="Metadata not loaded")
+        rows = metadata.filter(pl.col("video_id") == video_id).sort("pts_time")
+        if rows.is_empty():
+            raise HTTPException(status_code=404, detail="Video not found in metadata")
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["n", "pts_time", "frame_idx"])
+        for row in rows.iter_rows(named=True):
+            writer.writerow([row.get("keyframe_name", ""), row.get("pts_time"), row.get("frame_id")])
+        return output.getvalue()
 
     @app.post("/TextQuery")
     async def text_query_endpoint(request: Request):
@@ -614,16 +624,18 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
 
             service.last_results = results
 
-            expanded_info = [service.expander.cache.get(q.strip(), []) for q in queries] if service.expander else []
+            preparations = [getattr(service, "query_preparations", {}).get(q.strip(), {}) for q in queries if q.strip()]
+            expanded_info = [plan.get("chunks", []) for plan in preparations]
             return {
                 "kq": results,
                 "fquery": queries[0] if len(queries) > 0 else "",
                 "nquery": queries[1] if len(queries) > 1 else "",
                 "queries": queries,
                 "expanded": expanded_info,
+                "query_preparation": preparations,
                 "total_results": len(results)
             }
-        except HTTPException:
+        except (HTTPException, QueryPreparationError):
             raise
         except Exception as e:
             logger.error(f"Error in /TextQuery: {e}", exc_info=True)

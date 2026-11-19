@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import time
 import unittest
+from unittest.mock import patch
+from src.online_pipeline.query_preparation import prepare_english, prepare_chunks
 
 from src.online_pipeline.diverse_candidates import select_diverse_indices
 from src.online_pipeline.score_fusion import weighted_rrf, normalized_score, unit_score
@@ -17,6 +19,11 @@ def candidate(idx, score=0.5):
 
 
 class FusionTests(unittest.TestCase):
+    def setUp(self):
+        namespace.update(prepare_english=prepare_english, prepare_chunks=prepare_chunks)
+        namespace['config'].EXPANSION_WEIGHTS = [.7, .2, .1]
+        namespace['config'].RRF_RANK_CONSTANT = 60
+
     def test_primary_branch_outweighs_both_secondary_branches(self):
         result = weighted_rrf([[candidate(1)], [candidate(2)], [candidate(2)]], [.7, .2, .1])
         self.assertEqual([c['faiss_idx'] for c in result], [1, 2])
@@ -41,6 +48,7 @@ class FusionTests(unittest.TestCase):
     def test_service_batches_variants_and_applies_fusion(self):
         service = namespace['SearchService'].__new__(namespace['SearchService'])
         calls = []
+        service.query_preparations = {'query': {'weights': [.7, .2, .1]}}
         service.encode_query_variants = lambda q: ('vectors', ['primary', 'action', 'tags'])
         def batch(vectors, top_k):
             calls.append((vectors, top_k))
@@ -60,7 +68,7 @@ class FusionTests(unittest.TestCase):
         def encode(texts):
             batches.append(texts)
             return [[1, 0], [0, 1], [1, 1]]
-        service.encoder = SimpleNamespace(encode_text_batch=encode)
+        service.encoder = SimpleNamespace(encode_text_batch=encode, text_context_length=64, text_token_count=lambda text: len(text.split()) + 2)
         vectors, texts = service.encode_query_variants('input')
         self.assertEqual(vectors, [[1, 0], [0, 1], [1, 1]])
         self.assertEqual(texts, variants)
@@ -72,9 +80,8 @@ class FusionTests(unittest.TestCase):
         def fail(query):
             raise RuntimeError('test model unavailable')
         service.expander = SimpleNamespace(expand=fail)
-        service._normalize_query_language = lambda q: 'A bicycle racer'
-        service.encoder = SimpleNamespace(encode_text_batch=lambda texts: [[1, 0]] * len(texts))
-        with self.assertLogs(namespace['logger'], level='WARNING'):
+        service.encoder = SimpleNamespace(encode_text_batch=lambda texts: [[1, 0]] * len(texts), text_context_length=64, text_token_count=lambda text: len(text.split()) + 2)
+        with patch('src.online_pipeline.query_preparation.translate_vi_to_en', return_value='A bicycle racer'), self.assertLogs('src.online_pipeline.query_preparation', level='WARNING'):
             vectors, texts = service.encode_query_variants('input')
         self.assertEqual(texts, ['A bicycle racer'])
         self.assertEqual(vectors, [[1, 0]])

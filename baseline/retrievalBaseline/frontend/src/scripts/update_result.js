@@ -71,14 +71,15 @@ function createImageDiv(result, index) {
   `;
 
   const img = div.querySelector('img');
+  img.resultEntity = result.entity;
+  registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
   img.setAttribute('draggable', 'true');
   img.addEventListener('dragstart', drag);
   
   const exportIcon = div.querySelector('.export_icon');
   exportIcon.addEventListener('click', () => {
     img.dataset.src = imgUrl;
-    const frameId = result.entity.time;
-    addImageToExportArea(frameId, imgUrl, frameInfo);
+    pinImage(img);
   });
 
   // // Using unified event listeners
@@ -208,9 +209,7 @@ function addImageEventListeners() {
       const container = event.target.closest('.img-dis');
       const img = container.querySelector('img');
       const infor = container.querySelector('.infor');
-      const frameId = infor.textContent.split('-')[1];
-      const imageSrc = img.src;
-      addImageToExportArea(frameId, imageSrc, infor.textContent);
+      pinImage(img);
     });
   });
 

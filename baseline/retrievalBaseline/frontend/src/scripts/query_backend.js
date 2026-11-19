@@ -8,62 +8,71 @@ function handleEnterKeyPress(event) {
   }
 }
 
-// Perform multi-event search with debounce (supports KIS & TRAKE with N events)
-const performSearchMulti = debounce(async function (queries, ocrText = "") {
-  if (!queries || queries.length === 0) {
+// Show the exact strings encoded by the model, including fallback translations.
+function showQueryPreparation(payload, error = '') {
+  const errorElement = document.getElementById('query-error');
+  if (errorElement) {
+    errorElement.textContent = error;
+    errorElement.hidden = !error;
+  }
+  const details = document.getElementById('query-diagnostics');
+  const text = document.getElementById('query-diagnostics-text');
+  const plans = payload?.query_preparation || [];
+  if (details) details.hidden = plans.length === 0;
+  if (text) text.textContent = plans.map((plan, index) => {
+    const source = {original: 'Giữ nguyên truy vấn', local_llm: 'Mô hình local', translator: 'Bộ dịch dự phòng'}[plan.source] || plan.source;
+    return [`Mô tả ${index + 1} — ${source}`, ...(plan.warnings || []),
+      ...(plan.chunks || []).map((chunk, i) => `${i + 1}. ${chunk} (${plan.token_counts?.[i] ?? '?'} / ${plan.token_limit ?? '?'} token)`)].join('\n');
+  }).join('\n\n');
+}
+
+let latestTextRequest = 0;
+const performSearchMulti = debounce(async function (queries, ocrText = '') {
+  const requestId = ++latestTextRequest;
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = null;
+  if (!queries || !queries.some(query => query.trim())) {
     toggleLoadingIndicator(false);
     return;
   }
-
   const cacheKey = JSON.stringify([queries, ocrText]);
-  
+  showQueryPreparation(null);
   if (searchCache.has(cacheKey)) {
-    data = { kq: searchCache.get(cacheKey) };
+    data = searchCache.get(cacheKey);
     updateUIWithSearchResults(data.kq);
+    showQueryPreparation(data);
     toggleLoadingIndicator(false);
     return;
   }
-
   toggleLoadingIndicator(true);
-
-  if (currentAbortController) {
-    currentAbortController.abort();
-  }
-  currentAbortController = new AbortController();
-
+  const controller = new AbortController();
+  currentAbortController = controller;
   try {
-    const startTime = performance.now();
-    const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || "http://localhost:8006";
+    const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || 'http://localhost:8006';
     const response = await fetch(`${backendBase}/TextQuery`, {
-      method: "POST",
-      headers: {
-        'Content-Type': 'application/json',
-        'Connection': 'keep-alive',
-        'Keep-Alive': 'timeout=1000'
-      },
-      body: JSON.stringify({
-        queries: queries,
-        ocr_text: ocrText,
-        First_query: queries[0] || "",
-        Next_query: queries[1] || "",
-      }),
-      signal: currentAbortController.signal,
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({queries, ocr_text: ocrText, First_query: queries[0] || '', Next_query: queries[1] || ''}),
+      signal: controller.signal,
     });
-
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-    data = await response.json();
-    const duration = performance.now() - startTime;
-    console.log(`Fetch operation took ${duration.toFixed(2)}ms for ${queries.length} events`);
-    
-    searchCache.set(cacheKey, data.kq);
+    const payload = await response.json();
+    if (requestId !== latestTextRequest) return;
+    if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+    data = payload;
+    searchCache.set(cacheKey, payload);
     updateUIWithSearchResults(data.kq);
+    showQueryPreparation(data);
   } catch (error) {
-    if (error.name !== 'AbortError') {
-      console.error('Fetch error:', error);
+    if (requestId === latestTextRequest && error.name !== 'AbortError') {
+      data = {kq: []};
+      updateUIWithSearchResults([]);
+      showQueryPreparation(null, `Không thể tìm kiếm: ${error.message}`);
+      console.error('Search failed:', error);
     }
   } finally {
-    toggleLoadingIndicator(false);
+    if (requestId === latestTextRequest) {
+      toggleLoadingIndicator(false);
+      currentAbortController = null;
+    }
   }
 }, 300);
 
