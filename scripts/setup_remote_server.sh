@@ -83,7 +83,7 @@ fuser -k 8007/tcp 2>/dev/null || true
 # Serve the 'data' directory directly so both keyframes/ and map-keyframes/ are accessible:
 # http://192.168.28.112:8007/keyframes/L21_V001/001.jpg
 # http://192.168.28.112:8007/map-keyframes/L21_V001.csv
-nohup python3 -m http.server 8007 --directory "${PROJECT_DIR}/data" > media_server.log 2>&1 &
+nohup python3 scripts/media_server.py --port 8007 --bind 0.0.0.0 --directory "${PROJECT_DIR}/data" > media_server.log 2>&1 &
 SERVER_PID=$!
 
 echo "=========================================================="

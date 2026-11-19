@@ -2,7 +2,9 @@
 
 // Global variable to store the frame list
 let globalFrameList = [];
-let globalSecondList =[];
+let globalSecondList = {};
+let globalOriginalFrameList = {};
+let frameMappingRequest = 0;
 
 // Display video frames and set up the UI
 async function showVideoFrames(imgDiv) {
@@ -57,7 +59,7 @@ async function showVideoFrames(imgDiv) {
     framesContainer.dataset.directory = directory;
 
     // Load the CSV file and populate the globalFrameList
-    await loadFrameListFromCSV(directory, imageInfo);
+    if (!await loadFrameListFromCSV(directory, imageInfo)) return;
     
     await updateFrames(framesContainer, directory, currentFrame, imageInfo);
   }
@@ -81,39 +83,28 @@ function setupNavigationButtons() {
 
 async function loadFrameListFromCSV(directory, imageInfo) {
   const videoName = directory.split('/').filter(part => part.startsWith('L') && part.includes('V'))[0] || (imageInfo ? imageInfo.split('-')[0] : '');
-  const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://localhost:8007";
-  const csvFilePath = `${mediaBase}/map-keyframes/${videoName}.csv`;
+  const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || 'http://localhost:8006';
+  const csvFilePath = `${backendBase}/frame-mapping/${encodeURIComponent(videoName)}`;
+  const requestId = ++frameMappingRequest;
+  globalSecondList = {};
+  globalOriginalFrameList = {};
+  globalFrameList = [];
   try {
     const response = await fetch(csvFilePath);
-    if (!response.ok) {
-      console.warn(`Could not load CSV from ${csvFilePath}, status: ${response.status}`);
-      return;
+    if (!response.ok) throw new Error(`Không tải được timeline (${response.status}).`);
+    const mapping = parseFrameMapping(await response.text());
+    if (requestId !== frameMappingRequest) return false;
+    globalFrameList = Object.keys(mapping).map(Number).sort((a, b) => a - b);
+    for (const [key, item] of Object.entries(mapping)) {
+      globalSecondList[key] = item.timeSeconds;
+      globalOriginalFrameList[key] = item.frameId;
     }
-    const csvData = await response.text();
-
-    const lines = csvData.trim().split('\n');
-    globalSecondList = {};
-    globalFrameList = [];
-    lines.forEach(line => {
-      const parts = line.split(',');
-      if (parts.length >= 2 && !isNaN(parseFloat(parts[1]))) {
-        const frameIdx = parseInt(parts[0].trim(), 10);
-        const ptsTime = parseFloat(parts[1].trim());
-        if (!isNaN(frameIdx)) {
-          globalSecondList[String(frameIdx)] = ptsTime;
-          globalFrameList.push(frameIdx);
-        }
-      }
-    });
-
-    if (globalFrameList.length === 0) {
-      console.error('No valid frames found in CSV');
-    }
+    return globalFrameList.length > 0;
   } catch (error) {
-    console.error('Error loading CSV file:', error);
+    if (requestId === frameMappingRequest) showTemporaryAlert(error.message, 'warning');
+    return false;
   }
 }
-  
 
 // Create a container for a single frame
 function createFrameContainer(src, frameNumber, isCurrent, frameInfo) {
@@ -251,6 +242,11 @@ async function updateFrameContainer(frameContainer, frameNumber, directory, isCu
   const seconds_json = globalSecondList[`${frameNumber}`] !== undefined ? globalSecondList[`${frameNumber}`] : '';
   const videoName = directory.split('/').filter(part => part.startsWith('L') && part.includes('V'))[0] || '';
   const frameInfo = `${videoName}-${seconds_json}`;
+  registerFrameMetadata(frameElement, {
+    videoId: videoName, keyframeName: padded,
+    frameId: globalOriginalFrameList[String(frameNumber)] ?? null,
+    timeSeconds: globalSecondList[String(frameNumber)], src: framePath
+  });
   frameNameDiv.textContent = frameInfo;
 
   frameContainer.className = 'frame-container' + (isCurrent ? ' current-frame-container' : '');
@@ -391,11 +387,7 @@ function exportCurrentFrame() {
     const inforElement = currentFrameContainer.querySelector('.infor');
     
     if (imgElement && inforElement) {
-      const frameId = inforElement.textContent.split('-')[1];
-      const imageSrc = imgElement.src;
-      const frameInfo = inforElement.textContent;
-      
-      addImageToExportArea(frameId, imageSrc, frameInfo);
+      pinImage(imgElement);
     }
   }
 }
@@ -440,44 +432,10 @@ function handleRightClick(event) {
 
 // Update playVideoFromFrame to be more consistent with showVideo
 async function playVideoFromFrame(videoName, frameNumber) {
-  console.log("videoName: " + videoName);
-  console.log("frameNumber: " + frameNumber);
-  const detailsDiv = document.getElementById('Details');
-  const videoElement = document.getElementById('vid_details');
-  let player = null;
-
-  detailsDiv.style.display = 'block';
-
-  const videoSrc = await getVideo(videoName);
-
-  console.log("videoSrc: " + videoSrc);
-
-  if (!videoElement.playerInstance) {
-      videoElement.playerInstance = new VideoPlayer('vid_details', videoSrc);
-      player = videoElement.playerInstance;
-  } else {
-      player = videoElement.playerInstance;
-      player.videoSrc = videoSrc;
-      player.initPlayer();
+  const seconds = Number(globalSecondList[`${frameNumber}`]);
+  if (!Number.isFinite(seconds)) {
+    console.error('Missing timestamp for keyframe', videoName, frameNumber);
+    return;
   }
-
-  // Convert frame number to seconds
-  // This conversion should match how frames are handled in your system
-  // You might need to adjust this calculation based on your video's actual frame rate
-
-  const timeInSeconds = globalSecondList[`${frameNumber}`]; // Assuming 25 fps
-
-  player.video.currentTime = timeInSeconds;
-  player.play();
-
-  console.log("currentTime 2: " + timeInSeconds);
-
-  // Ensure frame navigation still works
-  const divVideoFrames = document.getElementById('video-frames');
-  if (divVideoFrames.style.display === 'flex') {
-      setupNavigationButtons();
-      document.addEventListener('keydown', handleKeyPress);
-  }
+  await openVideoPreview(videoName, seconds);
 }
-
-

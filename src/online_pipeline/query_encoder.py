@@ -53,10 +53,18 @@ class QueryEncoder():
         """Count tokens without CLIP's default 77-token truncation."""
         if self.tokenizer is None:
             raise RuntimeError("CLIP tokenizer is not initialized")
-        # Query packs are short, but this generous context preserves the true
-        # count while the caller decides how to split at the real context size.
-        tokens = self.tokenizer([query], context_length=max(256, self.text_context_length))
-        return int((tokens[0] != 0).sum().item())
+        # Count before padding/truncation; SigLIP padding is not necessarily 0.
+        encode = getattr(self.tokenizer, "encode", None)
+        if callable(encode):
+            try:
+                return len(encode(query, add_special_tokens=True))
+            except TypeError:
+                return len(encode(query)) + 2  # Older SimpleTokenizer: BOS/EOS.
+        backend = getattr(self.tokenizer, "tokenizer", None)
+        if backend is not None:
+            clean = getattr(self.tokenizer, "clean_fn", lambda value: value)
+            return len(backend.encode(clean(query), add_special_tokens=True, truncation=False))
+        raise RuntimeError("Tokenizer does not expose untruncated token counting")
 
     def _require_model(self) -> None:
         if self.model is None or self.tokenizer is None:

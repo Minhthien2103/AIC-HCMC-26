@@ -1,4 +1,4 @@
-  # AIC-HCMC 2026 — Hệ thống Truy vấn Video & Hỗ trợ Thi đấu
+# AIC-HCMC 2026 — Hệ thống Truy vấn Video & Hỗ trợ Thi đấu
 
 Hệ thống tìm kiếm khung hình video (Video Keyframe Retrieval) đa phương thức phục vụ cuộc thi **AI Challenge TP.HCM 2026 (AIC-HCMC-26)**. Hệ thống được tối ưu hóa đặc biệt để chạy trực tiếp trên GPU kết hợp với server lưu trữ dữ liệu.
 
@@ -135,8 +135,8 @@ flowchart TD
 
 Quy trình cài đặt môi trường lần đầu và khởi động hệ thống hàng ngày.
 
-### Bước 3.1: Tạo Môi trường ảo & Cài đặt Thư viện (Làm 1 lần đầu trên CMD)
-Mở cửa sổ **Command Prompt (CMD)** tại máy bạn và chọn một trong hai cách dưới đây:
+### Bước 3.1: Tạo Môi trường ảo & Cài đặt Thư viện (Làm 1 lần đầu trên máy cá nhân)
+Mở cửa sổ **Command Prompt (CMD)** hoặc **Anaconda Prompt** tại máy bạn và chọn một trong hai cách dưới đây:
 
 - **Cách 1: Sử dụng Conda**:
   ```cmd
@@ -196,22 +196,39 @@ Tải bộ file chỉ mục đã được tính toán sẵn và đặt vào đú
 
 ---
 
-### Bước 3.4: Mở kết nối SSH Tunnel tải ảnh Keyframe (PowerShell)
-Mở một cửa sổ **PowerShell** trên máy bạn và chạy lệnh sau để dẫn luồng ảnh từ Server Ubuntu (`192.168.28.112:8007`) về máy `localhost:8007`:
+### Bước 3.4: Chạy Media Server trên Server Ubuntu & Mở SSH Tunnel
 
+Trong lúc thi đấu và sử dụng, mở và giữ chạy các cửa sổ sau:
+
+#### Cửa sổ 1: Chạy Media Server hỗ trợ tua video (trên Server Ubuntu)
+Mở cửa sổ **PowerShell** hoặc **Terminal**, SSH vào Ubuntu:
 ```powershell
-ssh -N -L 8007:localhost:8007 team12@192.168.28.112
+ssh team12@192.168.28.112
+```
+Nhập mật khẩu (`123456`). Sau khi vào Ubuntu, chạy media server:
+```bash
+python3 ~/media_server_test.py --directory /home/team12/aic-data --port 8008
+# Hoặc chạy trực tiếp từ mã nguồn repo:
+# python3 scripts/media_server.py --directory /home/team12/aic-data --port 8008
+```
+*(Chi tiết xem thêm tại `scripts/MEDIA_SERVER.md`)*
+
+#### Cửa sổ 2: Mở SSH Tunnel nối máy bạn tới Media Server
+Mở một cửa sổ **PowerShell** mới trên máy bạn và chạy:
+```powershell
+ssh -N -o ExitOnForwardFailure=yes -L 8007:localhost:8008 team12@192.168.28.112
 ```
 - Nhập password server: `123456`
 - **Lưu ý:** *Giữ nguyên cửa sổ PowerShell này chạy ngầm trong suốt quá trình làm việc.*
 
 ---
 
-### Bước 3.5: Khởi động Hệ thống & Mở Web UI (Chỉ duy nhất 1 lệnh trên CMD)
-Server backend đã được tích hợp sẵn toàn bộ API, nạp các mô hình AI và **tự động mount toàn bộ giao diện Web UI**. Bạn chỉ cần mở **duy nhất 1 cửa sổ CMD**:
+### Bước 3.5: Khởi động Backend & Mở Web UI
+
+Server backend đã được tích hợp sẵn toàn bộ API, nạp các mô hình AI và **tự động mount toàn bộ giao diện Web UI**. Mở cửa sổ **Anaconda Prompt** hoặc **CMD**:
 
 ```cmd
-cd /d d:\STUDY\BIN\CS\PROJECT\AIC-HCMC-26
+cd /d "d:\STUDY\BIN\CS\PROJECT\AIC-HCMC-26"
 
 # Kích hoạt môi trường (chọn 1 trong 2):
 conda activate aic26
@@ -227,7 +244,7 @@ python src/server.py --port 8006 --llm 3b
 python src/server.py --port 8006 --llm 3b --vlm 2b
 ```
 
-👉 Sau khi terminal hiện `Uvicorn running on http://0.0.0.0:8006`, mở trình duyệt web truy cập ngay địa chỉ: **`http://localhost:8006/`** để bắt đầu thi đấu!
+👉 Sau khi terminal hiện `Uvicorn running on http://0.0.0.0:8006`, mở trình duyệt web truy cập ngay địa chỉ: **[http://localhost:8006](http://localhost:8006)** để bắt đầu thi đấu!
 
 ---
 
@@ -238,8 +255,9 @@ Hệ thống hỗ trợ nộp bài tự động qua API DRES hoặc xuất kết
 | Cổng chấm thi | Đường dẫn truy cập | Ghi chú |
 |---|---|---|
 | **UIT Contest DRES (Chính thức)** | [https://aiclub.uit.edu.vn/dres](https://aiclub.uit.edu.vn/dres) | Cổng chấm thi chính thức của BTC |
+| **Trang đánh giá DRES (Evaluation)** | [https://aiclub.uit.edu.vn/dres/evaluation/list](https://aiclub.uit.edu.vn/dres/evaluation/list) | Danh sách đánh giá / bảng điểm bài thi |
 
-- **Tài khoản nhóm:** team12_t5 - 123456
+- **Tài khoản nhóm:** `team12_t5` - `123456`
 - **Cách nộp trên Web UI:**
   1. Ghim các frame kết quả vào khu vực **Export Area** ở cạnh phải màn hình.
   2. Bấm nút **`🚀 Submit DRES`** ở góc trên thanh công cụ.
@@ -299,7 +317,9 @@ AIC-HCMC-26/
 │   └── ocr_text.parquet                  # Dữ liệu văn bản OCR (6.86 MB)
 ├── scripts/                              # Các kịch bản trích xuất đặc trưng & setup
 │   ├── extract_siglip_features_gpu.py    # Trích xuất vector SigLIP trên GPU
-│   └── extract_ocr_easyocr.py            # Trích xuất OCR bằng EasyOCR trên GPU
+│   ├── extract_ocr_easyocr.py            # Trích xuất OCR bằng EasyOCR trên GPU
+│   ├── media_server.py                   # Media server hỗ trợ HTTP Range streaming
+│   └── MEDIA_SERVER.md                   # Hướng dẫn chi tiết chạy Media Server
 └── .opv/                                 # Chứa file cấu hình OpenVPN mạng trường (.ovpn)
 ```
 

@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="src/styles/left_panel.css" />
     <link rel="stylesheet" href="src/styles/right_panel.css" />
     <link rel="stylesheet" href="src/styles/object_filter.css" />
-    <link rel="stylesheet" href="src/styles/show_video.css" />
+    <link rel="stylesheet" href="src/styles/show_video.css?v=2" />
     <link rel="stylesheet" href="src/styles/video_frame.css" />
     <link rel="stylesheet" href="src/styles/utils.css" />
     <link rel="stylesheet" href="src/styles/queries_history.css" />
@@ -294,6 +294,12 @@
             <button type="button" id="search-button" class="main-search-btn"><i class="fa fa-search"></i> Tìm kiếm (Enter)</button>
             <button type="button" id="filter-button" class="main-filter-btn"><i class="fa fa-filter"></i> Lọc Object</button>
           </div>
+          <p id="query-error" role="alert" hidden style="color: #fca5a5; white-space: pre-wrap;"></p>
+          <details id="query-diagnostics" hidden style="margin-top: 10px; color: #cbd5e1;">
+            <summary>Truy vấn thực tế dùng để tìm</summary>
+            <pre id="query-diagnostics-text" style="white-space: pre-wrap; overflow-wrap: anywhere; font: inherit;"></pre>
+          </details>
+          <small style="display: block; margin-top: 8px; color: #94a3b8;">Nhập tiếng Việt có dấu hoặc tiếng Anh. Nếu bản dịch sai, thay mô tả bằng bản tiếng Anh đã sửa rồi tìm lại.</small>
         </div>
         </div>
         
@@ -475,9 +481,9 @@
       <div class="details_bg" id="details_bg">
         <div class="draggable-bar"></div>
         <span class="close">×</span>
-        <video id="vid_details" class="vid_details" controls preload="auto" fluid="true">
-          <source src="" type="application/x-mpegURL"/>
-        </video>
+        <video id="vid_details" class="vid_details" controls preload="metadata" playsinline></video>
+        <div id="video-status" role="status" style="color: white; padding: 4px 12px;"></div>
+        <a id="video-direct-link" target="_blank" rel="noopener" style="display: block; padding: 4px 12px;">Mở video trực tiếp</a>
         <div class="custom-controls">
           <button id="rewindBtn"><i class="fas fa-backward"></i></button>
           <button id="initialTimeBtn"><i class="fas fa-redo"></i></button>
@@ -599,24 +605,25 @@
     </div>
 
     <script src="src/scripts/config.js?v=6"></script>
+    <script src="src/scripts/frame_metadata.js?v=1"></script>
     <script src="src/scripts/filter_get_infor.js?v=3"></script>
     <script src="src/scripts/short_cut.js?v=3"></script>
     <script src="src/scripts/preview.js?v=3"></script>
-    <script src="src/scripts/web_socket.js?v=3"></script>
+    <script src="src/scripts/web_socket.js?v=6"></script>
     <script src="src/websocket/multi_combined_search.js?v=3"></script>
     <script src="src/scripts/start_ui.js?v=3"></script>
-    <script src="src/scripts/update_result.js?v=4"></script>
+    <script src="src/scripts/update_result.js?v=6"></script>
     <script src="src/scripts/dice.js?v=3"></script>
-    <script src="src/scripts/show_video.js?v=3"></script>
-    <script src="src/scripts/show_videoframe.js?v=3"></script>
-    <script src="src/scripts/export.js?v=3"></script>
+    <script src="src/scripts/show_video.js?v=4"></script>
+    <script src="src/scripts/show_videoframe.js?v=6"></script>
+    <script src="src/scripts/export.js?v=6"></script>
     <script src="src/scripts/group_search.js?v=3"></script>
     <script src="src/scripts/left_panel.js?v=5"></script>
     <script src="src/scripts/queries_history.js?v=3"></script>
     <script src="src/scripts/object_list.js?v=3"></script>
-    <script src="src/scripts/pagnition.js?v=3"></script>
+    <script src="src/scripts/pagnition.js?v=7"></script>
     <script src="src/scripts/submit_dres.js?v=6"></script>
-    <script src="src/scripts/query_backend.js?v=4"></script>
+    <script src="src/scripts/query_backend.js?v=7"></script>
   </body>
 </html>
 

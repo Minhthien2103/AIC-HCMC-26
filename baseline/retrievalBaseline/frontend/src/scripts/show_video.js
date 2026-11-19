@@ -1,187 +1,88 @@
-//------------------------ Show video ------------------------//
-
-
-// VideoPlayer class to handle video playback and HLS streaming
+// MP4 preview: one player and one set of listeners for the modal.
 class VideoPlayer {
-    constructor(videoElementId, videoSrc) {
+    constructor(videoElementId, videoSrc, initialTime = 0) {
         this.video = document.getElementById(videoElementId);
-        this.videoSrc = videoSrc;
-        this.hls = null;
-        this.initPlayer();
-
         this.initialTime = 0;
-        this.addCustomControls();
-    }
-  
-    // Initialize the video player depending on browser support
-    initPlayer() {
-        if (Hls.isSupported()) {
-            this.initHlsPlayer();
-        } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
-            this.initNativePlayer();
-        } else {
-            console.error('HLS is not supported in this browser.');
-        }
-        this.addEventListeners();
-    }
-  
-    // Initialize HLS.js player
-    initHlsPlayer() {
-        this.hls = new Hls({ 
-            enableWorker: true,
-            lowLatencyMode: true
+        this.pendingSeek = null;
+        this.video.addEventListener('loadedmetadata', () => {
+            if (this.pendingSeek !== null) {
+                this.seek(this.pendingSeek);
+                this.pendingSeek = null;
+            }
+            this.play();
         });
-        this.hls.loadSource(this.videoSrc);
-        this.hls.attachMedia(this.video);
-        this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            this.video.play().catch(e => console.error('Auto-play was prevented:', e));
-        });
-    }
-  
-    // Initialize native player for HLS streams if supported
-    initNativePlayer() {
-        this.video.src = this.videoSrc;
-    }
-  
-    // Add event listeners to handle video playback events
-    addEventListeners() {
-        this.video.addEventListener('loadedmetadata', () => this.onLoadedMetadata());
-        this.video.addEventListener('error', (e) => this.onError(e));
-        this.video.addEventListener('waiting', () => this.onWaiting());
-        this.video.addEventListener('canplay', () => this.onCanPlay());
-        this.video.addEventListener('click', () => this.togglePlayPause());
-    }
-  
-    onLoadedMetadata() {
-        // console.log('Video metadata loaded');
-    }
-  
-    onError(e) {
-        // console.error('Video error:', e);
-    }
-  
-    onWaiting() {
-        // console.log('Video is buffering');
-    }
-  
-    onCanPlay() {
-        // console.log('Video can play');
+        this.video.addEventListener('error', () => this.setStatus(
+            'Không tải được video. Kiểm tra đường dẫn, kết nối media server hoặc định dạng video.'));
+        this.video.addEventListener('waiting', () => this.setStatus('Đang tải video…'));
+        this.video.addEventListener('playing', () => this.setStatus(''));
+        document.getElementById('rewindBtn')?.addEventListener('click', () => this.skip(-10));
+        document.getElementById('forwardBtn')?.addEventListener('click', () => this.skip(10));
+        document.getElementById('initialTimeBtn')?.addEventListener('click', () => this.seek(this.initialTime));
+        this.load(videoSrc, initialTime);
     }
 
-    togglePlayPause() {
-        // console.log('Video pause');
+    setStatus(text) {
+        const status = document.getElementById('video-status');
+        if (status) status.textContent = text;
     }
-  
-    play() {
-        this.video.play().catch(e => console.error('Play failed:', e));
-    }
-  
-    pause() {
+
+    load(src, time = 0) {
         this.video.pause();
+        this.initialTime = Number.isFinite(Number(time)) ? Math.max(0, Number(time)) : 0;
+        this.pendingSeek = this.initialTime;
+        this.videoSrc = src;
+        this.setStatus('Đang tải video…');
+        const link = document.getElementById('video-direct-link');
+        if (link) link.href = src;
+        this.video.src = src;
+        this.video.load();
     }
-  
+
+    play() {
+        this.video.play().catch(error => {
+            if (error.name === 'AbortError') return;
+            this.setStatus(error.name === 'NotAllowedError'
+                ? 'Bấm nút Play để phát video.'
+                : 'Không phát được video. Thử mở video trực tiếp bằng liên kết bên dưới.');
+        });
+    }
+
+    pause() { this.video.pause(); }
     seek(time) {
-        if (isNaN(time)) return;
-        this.video.currentTime = time;
-    }
-  
-    setQuality(level) {
-        if (this.hls) {
-            this.hls.currentLevel = level;
+        if (!Number.isFinite(Number(time))) return;
+        if (this.video.readyState < 1) {
+            this.pendingSeek = Math.max(0, Number(time));
+            return;
         }
+        const upper = Number.isFinite(this.video.duration) ? this.video.duration : Infinity;
+        this.video.currentTime = Math.min(upper, Math.max(0, Number(time)));
     }
-  
-    // Clean up resources and remove event listeners
-    destroy() {
-        if (this.hls) {
-            this.hls.destroy();
-        }
-        this.video.removeEventListener('loadedmetadata', this.onLoadedMetadata);
-        this.video.removeEventListener('error', this.onError);
-        this.video.removeEventListener('waiting', this.onWaiting);
-        this.video.removeEventListener('canplay', this.onCanPlay);
-        this.video.removeEventListener('click', this.togglePlayPause);
-    }
-    
-    //----------------------------------
-    addCustomControls() {
-        document.getElementById('rewindBtn').addEventListener('click', () => this.skip(-10));
-        document.getElementById('forwardBtn').addEventListener('click', () => this.skip(10));
-        document.getElementById('initialTimeBtn').addEventListener('click', () => this.goToInitialTime());
-    }
-    
-    skip(seconds) {
-        this.video.currentTime += seconds;
-    }
-    
-    goToInitialTime() {
-        this.video.currentTime = this.initialTime;
-    }
-  }
+    skip(seconds) { this.seek(this.video.currentTime + seconds); }
+}
 
-
-// Generate the video URL based on video name
 async function getVideo(videoName) {
-    const mediaBase = (window.CONFIG && window.CONFIG.MEDIA_BASE) || window.MEDIA_BASE || "http://localhost:8007";
-    return `${mediaBase}/videos/${videoName}.mp4`;
+    const mediaBase = (window.CONFIG && (window.CONFIG.VIDEO_BASE || window.CONFIG.MEDIA_BASE))
+        || window.MEDIA_BASE || 'http://localhost:8007';
+    const name = String(videoName).replace(/\.mp4$/i, '');
+    return `${mediaBase.replace(/\/$/, '')}/videos/${encodeURIComponent(name)}.mp4`;
 }
 
-
-
-// Show video details
-async function showVideo(img) {
-    const detailsDiv = document.getElementById('Details')
+async function openVideoPreview(videoName, time) {
     const videoElement = document.getElementById('vid_details');
-    let player = null;
-
-    // Show the details div
-    detailsDiv.style.display = 'block';
-  
-    // Get video URL based on image data
-    const videoSrc= await getVideo(data.kq[img.id-1].entity.video)
-
-    console.log("videoName: " + data.kq[img.id-1].entity.video);
-    console.log("img.id: " + img.id);
-    console.log("videoSrc: " + videoSrc);
-
-    // Initialize the VideoPlayer if it hasn't been already
+    document.getElementById('Details').style.display = 'block';
+    const src = await getVideo(videoName);
     if (!videoElement.playerInstance) {
-        videoElement.playerInstance = new VideoPlayer('vid_details', videoSrc);
-        player = videoElement.playerInstance;
+        videoElement.playerInstance = new VideoPlayer('vid_details', src, time);
     } else {
-        player = videoElement.playerInstance;
-        player.videoSrc = videoSrc;
-        player.initPlayer(); // Re-initialize the player with the new source
+        videoElement.playerInstance.load(src, time);
     }
-  
-    // Set the video current time and play the video
-    player.video.currentTime = data.kq[img.id - 1].entity.time;
-    player.play();
-
-    console.log("currentTime 1: " + data.kq[img.id - 1].entity.time);
-
-    // Ensure frame navigation still works
-    const divVideoFrames = document.getElementById('video-frames');
-    if (divVideoFrames.style.display === 'flex') {
-        setupNavigationButtons();
-        document.addEventListener('keydown', handleKeyPress);
-    }
-  
-     
-    // Set up event listeners for video control buttons
-    document.getElementById('playBtn')?.addEventListener('', () => player.play());
-    document.getElementById('pauseBtn')?.addEventListener('click', () => player.pause());
-    document.getElementById('seekBtn')?.addEventListener('click', () => player.seek(3)); // Seek to 10 seconds
-    document.getElementById('qualitySelect')?.addEventListener('change', (e) => player.setQuality(parseInt(e.target.value)));
-
-
-    // Set the video current time and play the video
-    const initialTime = data.kq[img.id - 1].entity.time;
-    player.video.currentTime = initialTime;
-    player.initialTime = initialTime;  // Store the initial time
-    player.play();
 }
-  
+
+async function showVideo(img) {
+    const entity = img.resultEntity || data?.kq?.[Number(img.id) - 1]?.entity;
+    if (!entity) return;
+    await openVideoPreview(entity.video, entity.time);
+}
 
 // Close video details when Escape key is pressed
 document.addEventListener("keydown", event => {
