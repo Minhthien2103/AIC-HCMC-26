@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,7 @@ import torch
 from PIL import Image
 from src.online_pipeline.score_fusion import unit_score
 from src.online_pipeline.diverse_candidates import select_diverse_indices
+from src.online_pipeline.image_prefetch import prefetch_images
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,8 @@ def fetch_frame_image(video_id: str, frame_name: str, media_base: str = "http://
     for p in local_candidates:
         if p.is_file():
             try:
-                return Image.open(p).convert("RGB")
+                with Image.open(p) as image:
+                    return image.convert("RGB")
             except Exception:
                 pass
 
@@ -44,7 +47,8 @@ def fetch_frame_image(video_id: str, frame_name: str, media_base: str = "http://
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "AIC-VLM-Reranker/1.0"})
         with urllib.request.urlopen(req, timeout=3) as resp:
-            return Image.open(io.BytesIO(resp.read())).convert("RGB")
+            with Image.open(io.BytesIO(resp.read())) as image:
+                return image.convert("RGB")
     except Exception:
         return None
 
@@ -187,6 +191,7 @@ class VLMReranker:
         diversity_pool: int = 100,
         diversity_similarity: float = 0.97,
         diversity_seconds: float = 3.0,
+        image_workers: int = 4,
     ) -> List[Dict[str, Any]]:
         """Rerank up to top_n diverse candidates; retain all unselected frames."""
         if not candidates or not query or top_n <= 0:
@@ -208,32 +213,36 @@ class VLMReranker:
 
         logger.info(f"[VLM Rerank] Scoring Top {len(to_rerank)} frames for query: '{query[:50]}'...")
 
-        for idx, c in enumerate(to_rerank):
-            entity = c.get("entity", {}) if isinstance(c.get("entity"), dict) else {}
-            v_id = entity.get("video") or c.get("video") or c.get("video_id", "")
-            f_name = entity.get("frame_id") or c.get("frame_id") or c.get("keyframe_name", "")
-            orig_score = unit_score(c.get("orig_score", c.get("score", c.get("distance", 0.0))))
+        def download(candidate):
+            entity = candidate.get("entity") or {}
+            video = entity.get("video") or candidate.get("video") or candidate.get("video_id", "")
+            frame = entity.get("frame_id") or candidate.get("frame_id") or candidate.get("keyframe_name", "")
+            return fetch_frame_image(video, frame, media_base=self.media_base)
 
-            img = fetch_frame_image(v_id, f_name, media_base=self.media_base)
-            vlm_score = self.score_single_frame(img, query) if img is not None else None
-            if vlm_score is not None:
-                vlm_score = unit_score(vlm_score)
-                blended_score = (vlm_weight * vlm_score) + ((1.0 - vlm_weight) * orig_score)
-                c["vlm_score"] = round(vlm_score, 3)
-                c["orig_score"] = orig_score
-                c["score"] = round(blended_score, 4)
-                c["distance"] = round(blended_score, 4)
-                c["vlm_verified"] = True
-                if entity:
-                    entity["vlm_score"] = round(vlm_score, 3)
-                    entity["vlm_verified"] = True
-            else:
-                c["score"] = orig_score
-                c["distance"] = orig_score
-                c.pop("vlm_score", None)
-                c["vlm_verified"] = False
-                entity.pop("vlm_score", None)
-                entity["vlm_verified"] = False
+        with closing(prefetch_images(to_rerank, download, workers=image_workers)) as images:
+            for c, img in images:
+                entity = c.get("entity") or {}
+                orig_score = unit_score(c.get("orig_score", c.get("score", c.get("distance", 0.0))))
+
+                vlm_score = self.score_single_frame(img, query) if img is not None else None
+                if vlm_score is not None:
+                    vlm_score = unit_score(vlm_score)
+                    blended_score = (vlm_weight * vlm_score) + ((1.0 - vlm_weight) * orig_score)
+                    c["vlm_score"] = round(vlm_score, 3)
+                    c["orig_score"] = orig_score
+                    c["score"] = round(blended_score, 4)
+                    c["distance"] = round(blended_score, 4)
+                    c["vlm_verified"] = True
+                    if entity:
+                        entity["vlm_score"] = round(vlm_score, 3)
+                        entity["vlm_verified"] = True
+                else:
+                    c["score"] = orig_score
+                    c["distance"] = orig_score
+                    c.pop("vlm_score", None)
+                    c["vlm_verified"] = False
+                    entity.pop("vlm_score", None)
+                    entity["vlm_verified"] = False
 
         # Sort reranked top candidates descending by new blended score
         to_rerank.sort(key=lambda x: x.get("score", 0.0), reverse=True)

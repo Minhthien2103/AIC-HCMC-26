@@ -112,7 +112,7 @@ flowchart TD
     
     WebUI --> VLMRerankBtn["Người dùng bấm: ⚡ Rerank AI (Top 20)"]
     VLMRerankBtn --> DiverseFrames["Chọn tối đa 20 frame đa dạng từ Top 100 bằng vector FAISS"]
-    DiverseFrames --> StreamImg["Stream các Keyframe đã chọn qua Port 8007"]
+    DiverseFrames --> StreamImg["Tải trước ảnh qua Port 8007 (Tối đa 4 luồng)"]
     StreamImg --> VLMModel["Qwen VLM 4-bit Reranker"]
     VLMModel --> VLMScore["Chấm 0–10 → Điểm 0–1 & Hòa trộn"]
     VLMScore --> FinalTop["Sắp xếp nhóm đã chấm; Giữ các frame còn lại phía sau"]
@@ -127,6 +127,7 @@ flowchart TD
 - **Điểm thống nhất 0–1:** Chuẩn hóa RRF, cosine và điểm Multi-Event trước khi kết hợp. Khi dùng OCR: `S = (điểm nền + 0.35 × khớp) / 1.35`; VLM: `0.35 × S + 0.65 × (điểm VLM / 10)`.
 - **Frame đa dạng:** Nút Rerank chọn tối đa **20 frame từ Top 100**; bỏ qua frame cùng video khi vừa gần **≤ 3 giây**, vừa giống **cosine ≥ 0.97**; khác cảnh hoặc cách xa vẫn được giữ.
 - **VLM Reranking:** Chỉ tải/chấm ảnh đã chọn, giữ thang **0–10**. Frame không được chọn vẫn nằm phía sau.
+- **Tải ảnh Rerank:** Tối đa **4 luồng tải trước** trong lúc VLM chấm ảnh hiện tại; hàng đợi giới hạn, giữ nguyên ảnh gốc. Chỉnh bằng `AIC_VLM_IMAGE_WORKERS` (1–8).
 
 ---
 
