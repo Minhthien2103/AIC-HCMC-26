@@ -15,17 +15,43 @@ function fixture(fetch) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../baseline/retrievalBaseline/frontend/src/scripts/query_backend.js'), 'utf8'), context);
   return {get, updates, run:code=>vm.runInContext(code, context)};
 }
-const payload = {kq:[{id:1}],query_preparation:[{source:'local_llm', chunks:['Cyclist number 71'], token_counts:[5],token_limit:64,warnings:[]}]};
+const payload = {kq:[{id:1}],query_preparation:[{source:'local_llm', english:['Cyclist number 71', 'A cyclist'], chunks:['Cyclist number 71'], token_counts:[5],token_limit:64,warnings:[]}]};
 
 test('actual English query remains visible on a cache hit', async () => {
   let calls=0;
   const f=fixture(async()=>{calls++; return {ok:true,json:async()=>payload};});
   await f.run("performSearchMulti(['đua xe đạp'])");
   assert.match(f.get('query-diagnostics-text').textContent, /Cyclist number 71/);
+  assert.equal(f.get('query-translation').hidden, false);
+  assert.match(f.get('query-translation').textContent, /Cyclist number 71/);
+  assert.doesNotMatch(f.get('query-translation').textContent, /A cyclist/);
   f.get('query-diagnostics-text').textContent='stale';
   await f.run("performSearchMulti(['đua xe đạp'])");
   assert.equal(calls,1);
   assert.match(f.get('query-diagnostics-text').textContent, /Cyclist number 71/);
+  assert.match(f.get('query-translation').textContent, /Cyclist number 71/);
+});
+
+test('primary translation supports events and clears on a new request without diagnostics', () => {
+  const f=fixture();
+  f.run(`showQueryPreparation({query_preparation:[
+    {english:['A white lion-dance costume', 'other']},
+    {english:['<img src=x onerror=alert(1)>']}
+  ]})`);
+  assert.match(f.get('query-translation').textContent, /Sự kiện 1: A white lion-dance costume/);
+  assert.match(f.get('query-translation').textContent, /Sự kiện 2: <img/);
+  assert.equal(f.get('query-translation').innerHTML, undefined);
+  f.run('showQueryPreparation(null)');
+  assert.equal(f.get('query-translation').hidden, true);
+  assert.equal(f.get('query-translation').textContent, '');
+});
+
+test('search failure identifies the API for diagnosis', async () => {
+  const f=fixture(async()=>({ok:false,json:async()=>({detail:'Search backend unavailable'})}));
+  await f.run("performSearchMulti(['test'])");
+  assert.match(f.get('query-error').textContent, /Search backend unavailable/);
+  assert.match(f.get('query-error').textContent, /http:\/\/localhost:8006\/TextQuery/);
+  assert.equal(f.get('query-translation').hidden, true);
 });
 
 test('search error is shown and previous frames are cleared; failed queries are not cached', async () => {

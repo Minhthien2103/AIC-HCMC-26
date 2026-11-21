@@ -295,6 +295,7 @@
             <button type="button" id="filter-button" class="main-filter-btn"><i class="fa fa-filter"></i> Lọc Object</button>
           </div>
           <p id="query-error" role="alert" hidden style="color: #fca5a5; white-space: pre-wrap;"></p>
+          <p id="query-translation" role="status" hidden style="margin-top: 10px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: anywhere;"></p>
           <details id="query-diagnostics" hidden style="margin-top: 10px; color: #cbd5e1;">
             <summary>Truy vấn thực tế dùng để tìm</summary>
             <pre id="query-diagnostics-text" style="white-space: pre-wrap; overflow-wrap: anywhere; font: inherit;"></pre>
@@ -568,6 +569,16 @@
             <input type="text" id="dres-eval-input" value="675a3430-abaa-4d8c-b650-c8db1246d429" placeholder="Evaluation UUID (VD: 675a3430-abaa-4d8c-b650-c8db1246d429)">
           </div>
 
+          <div class="dres-form-group">
+            <label for="dres-collection-input">Collection DRES (tùy chọn, dành cho KIS):</label>
+            <input type="text" id="dres-collection-input" placeholder="Để trống để DRES tự xác định">
+            <small>Chỉ điền tên chính xác do ban tổ chức cung cấp khi cần. Lưu riêng theo máy chủ và Evaluation ID.</small>
+          </div>
+          <details style="margin: 10px 0;">
+            <summary>Chi tiết lỗi nộp gần nhất (đã ẩn session)</summary>
+            <pre id="dres-last-error" hidden style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto;"></pre>
+          </details>
+
           <div class="dres-divider"><span>Cách 1: Đăng nhập tự động với tài khoản Đội thi</span></div>
 
           <div class="dres-form-row">
@@ -622,8 +633,8 @@
     <script src="src/scripts/queries_history.js?v=3"></script>
     <script src="src/scripts/object_list.js?v=3"></script>
     <script src="src/scripts/pagnition.js?v=7"></script>
-    <script src="src/scripts/submit_dres.js?v=6"></script>
-    <script src="src/scripts/query_backend.js?v=7"></script>
+    <script src="src/scripts/submit_dres.js?v=7"></script>
+    <script src="src/scripts/query_backend.js?v=8"></script>
   </body>
 </html>
 

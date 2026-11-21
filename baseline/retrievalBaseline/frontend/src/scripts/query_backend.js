@@ -18,6 +18,16 @@ function showQueryPreparation(payload, error = '') {
   const details = document.getElementById('query-diagnostics');
   const text = document.getElementById('query-diagnostics-text');
   const plans = payload?.query_preparation || [];
+  const translation = document.getElementById('query-translation');
+  if (translation) {
+    const primary = plans.map((plan, index) => {
+      const english = plan.english?.[0];
+      if (!english) return '';
+      return `${plans.length > 1 ? `Sự kiện ${index + 1}: ` : ''}${english}`;
+    }).filter(Boolean);
+    translation.textContent = primary.length ? `Bản dịch chính dùng để tìm:\n${primary.join('\n')}` : '';
+    translation.hidden = primary.length === 0;
+  }
   if (details) details.hidden = plans.length === 0;
   if (text) text.textContent = plans.map((plan, index) => {
     const source = {original: 'Giữ nguyên truy vấn', local_llm: 'Mô hình local', translator: 'Bộ dịch dự phòng'}[plan.source] || plan.source;
@@ -56,7 +66,10 @@ const performSearchMulti = debounce(async function (queries, ocrText = '') {
     });
     const payload = await response.json();
     if (requestId !== latestTextRequest) return;
-    if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`;
+      throw new Error(`${detail}\nAPI: ${backendBase}/TextQuery`);
+    }
     data = payload;
     searchCache.set(cacheKey, payload);
     updateUIWithSearchResults(data.kq);

@@ -67,6 +67,33 @@ function getDresBaseUrl() {
            "https://aiclub.uit.edu.vn/dres";
 }
 
+// Scope the optional collection to one server/evaluation, never guess its name.
+function dresCollectionKey(host, evaluationId) {
+    return `dresCollection:${JSON.stringify([host.replace(/\/+$/, ''), evaluationId.trim()])}`;
+}
+
+function getDresCollection(host, evaluationId) {
+    return localStorage.getItem(dresCollectionKey(host, evaluationId)) || '';
+}
+
+function saveDresCollection(host, evaluationId) {
+    const input = document.getElementById('dres-collection-input');
+    if (input) localStorage.setItem(dresCollectionKey(host, evaluationId), input.value.trim());
+}
+
+function recordDresFailure(endpoint, task, body, status, data, sessionId) {
+    let serialized = JSON.stringify({time: new Date().toISOString(), endpoint, task, payload: body, status, response: data}, null, 2);
+    // DRES/proxies may echo the request URL in their error response.
+    for (const secret of [sessionId, encodeURIComponent(sessionId)]) {
+        if (secret) serialized = serialized.split(secret).join('[REDACTED]');
+    }
+    serialized = serialized.replace(/([?&]session=)[^\s&"<>]+/gi, '$1[REDACTED]');
+    try { localStorage.setItem('dresLastSubmissionError', serialized); } catch {}
+    const display = document.getElementById('dres-last-error');
+    if (display) { display.textContent = serialized; display.hidden = false; }
+    return JSON.parse(serialized);
+}
+
 function getDresEvaluationId() {
     return localStorage.getItem('evaluationID') || 
            (window.CONFIG && window.CONFIG.DRES_EVALUATION_ID) || 
@@ -120,6 +147,13 @@ function openDresModal() {
 
     if (hostInput) hostInput.value = getDresBaseUrl();
     if (evalInput) evalInput.value = getDresEvaluationId();
+    const collectionInput = document.getElementById('dres-collection-input');
+    if (collectionInput) collectionInput.value = getDresCollection(getDresBaseUrl(), getDresEvaluationId());
+    const lastError = document.getElementById('dres-last-error');
+    if (lastError) {
+        lastError.textContent = localStorage.getItem('dresLastSubmissionError') || '';
+        lastError.hidden = !lastError.textContent;
+    }
     
     const curSession = getDresSessionId();
     if (sessionInput) sessionInput.value = curSession;
@@ -235,6 +269,7 @@ async function handleDresLogin() {
         localStorage.setItem('userName', user);
         localStorage.setItem('contestSessionID', sessionId);
         localStorage.setItem('evaluationID', evalId);
+        saveDresCollection(host, evalId);
 
         // Update display in modal
         const sessionInput = document.getElementById('dres-session-input');
@@ -267,6 +302,7 @@ function handleDresSaveConfig() {
 
     localStorage.setItem('dresHost', host);
     localStorage.setItem('evaluationID', evalId);
+    saveDresCollection(host, evalId);
     if (session) {
         localStorage.setItem('contestSessionID', session);
     }
@@ -372,7 +408,16 @@ async function submit_to_dres_v2() {
         };
     }
 
-    const contestURL = `${dresBase}/api/v2/submit/${evaluationId}?session=${sessionId}`;
+    const collection = getDresCollection(dresBase, evaluationId);
+    if (collection) {
+        for (const set of body.answerSets || []) {
+            for (const answer of set.answers || []) {
+                if (answer.mediaItemName) answer.mediaItemCollectionName = collection;
+            }
+        }
+    }
+    const endpoint = `${dresBase}/api/v2/submit/${encodeURIComponent(evaluationId)}`;
+    const contestURL = `${endpoint}?session=${encodeURIComponent(sessionId)}`;
 
     console.log("[DRES Submit] Target URL:", `${dresBase}/api/v2/submit/${evaluationId}`);
     console.log("[DRES Submit] Payload:", JSON.stringify(body, null, 2));
@@ -399,9 +444,13 @@ async function submit_to_dres_v2() {
 
         const data = await readDresResponse(response);
         if (!response.ok) {
-            const errorDetail = data.description || data.message || `HTTP ${response.status}`;
+            const report = recordDresFailure(endpoint, currentTask, body, response.status, data, sessionId);
+            const errorDetail = report.response.description || report.response.message || report.response.detail || `HTTP ${response.status}`;
 
-            if (response.status === 412) {
+            if (/collection.*not found|could not find.*collection/i.test(String(errorDetail))) {
+                showTemporaryAlert(`❌ DRES không tìm thấy collection (HTTP ${response.status}). Xem DRES Login để lấy chi tiết lỗi.`, 'error');
+                alert(`DRES trả về HTTP ${response.status}: ${errorDetail}\n\nEvaluation: ${evaluationId}\nVideo: ${videoId}\nCollection gửi: ${collection || '(để DRES tự xác định)'}\n\nKiểm tra đúng Evaluation ID; nhờ ban tổ chức xác nhận collection của task. Nếu có tên collection chính xác, nhập tại DRES Login. Chi tiết lỗi đã lưu ở đó (ẩn session).`);
+            } else if (response.status === 412) {
                 showTemporaryAlert("⚠️ Lỗi 412: Nộp trùng với kết quả vừa nộp hoặc thời gian làm bài của task đã hết!", "warning");
                 alert("⚠️ THÔNG BÁO TỪ DRES (HTTP 412 - Precondition Failed):\n\nBạn vừa nộp trùng kết quả với lần nộp trước, hoặc thời gian làm bài của câu hỏi đã kết thúc!");
             } else if (response.status === 401) {
@@ -456,6 +505,14 @@ window.submit_to_dres_v2 = submit_to_dres_v2;
 // ------------------------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
+    for (const id of ['dres-host-input', 'dres-eval-input']) {
+        document.getElementById(id)?.addEventListener('input', () => {
+            const collectionInput = document.getElementById('dres-collection-input');
+            const host = document.getElementById('dres-host-input')?.value.trim() || getDresBaseUrl();
+            const evaluation = document.getElementById('dres-eval-input')?.value.trim() || getDresEvaluationId();
+            if (collectionInput) collectionInput.value = getDresCollection(host, evaluation);
+        });
+    }
     // 1. Hook DRES Config Button
     const configBtn = document.getElementById('dres-config-btn');
     if (configBtn) {

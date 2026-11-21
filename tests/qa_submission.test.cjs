@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const scripts = path.join(__dirname, '../baseline/retrievalBaseline/frontend/src/scripts');
 
-function fixture() {
+function fixture(response = {ok: true, status: 200, text: async () => '{"status":"OK"}'}) {
   class Element {
     constructor() {
       this.children = []; this.style = {}; this.dataset = {}; this.value = '';
@@ -26,15 +26,16 @@ function fixture() {
     return found;
   };
   const requests = [], messages = [];
+  const saved = new Map([['dresHost', 'https://dres.example'], ['evaluationID', 'evaluation-1'], ['contestSessionID', 'secret-session']]);
   const context = vm.createContext({ console: {log() {}, error() {}}, URL, setTimeout: fn => fn(),
     document: { getElementById: element, querySelector: element, querySelectorAll: inputs,
       createElement: () => new Element(), addEventListener() {} },
     window: { location: { href: 'http://localhost:8006/' }, addEventListener() {} },
     socket_share: null, WebSocket: { OPEN: 1 }, alert: message => messages.push(message),
-    localStorage: { getItem: () => 'test-only' },
+    localStorage: { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
     fetch: async (url, options) => {
       requests.push({url, body: JSON.parse(options.body)});
-      return {ok: true, json: async () => ({status: 'OK'})};
+      return response;
     }
   });
   for (const name of ['frame_metadata.js', 'export.js', 'submit_dres.js']) {
@@ -50,8 +51,41 @@ function fixture() {
       timeSeconds: time, src: `http://localhost:8007/keyframes/${video}/${keyframe}.jpg`};
     run('addImageToExportArea(item)');
   };
-  return {context, run, pin, requests, messages, element, inputs};
+  return {context, run, pin, requests, messages, element, inputs, saved};
 }
+
+test('KIS collection is optional, scoped to evaluation, and never added to QA text answers', async () => {
+  const f = fixture(); f.pin('L01_V001', 1);
+  f.element('global-task-select').value = 'kis';
+  await f.run('submit_to_dres_v2()');
+  assert.equal(f.requests[0].body.answerSets[0].answers[0].mediaItemCollectionName, undefined);
+  assert.ok(f.messages.some(message => message.includes('Đã nộp thành công')));
+  f.run("localStorage.setItem(dresCollectionKey(getDresBaseUrl(), getDresEvaluationId()), 'Official collection')");
+  await f.run('submit_to_dres_v2()');
+  assert.equal(f.requests[1].body.answerSets[0].answers[0].mediaItemCollectionName, 'Official collection');
+  f.element('global-task-select').value = 'kis-qa';
+  f.run("updateVqaInput(exportedImages[0].key, '7')");
+  await f.run('submit_to_dres_v2()');
+  assert.equal(f.requests[2].body.answerSets[0].answers[0].mediaItemCollectionName, undefined);
+  assert.equal(f.run("getDresCollection(getDresBaseUrl(), 'different-evaluation')"), '');
+  assert.equal(f.run("getDresCollection('https://other.example', getDresEvaluationId())"), '');
+});
+
+test('DRES 500 saves redacted context, displays collection guidance, and does not retry', async () => {
+  const f = fixture({ok:false, status:500, text:async()=>JSON.stringify({description:'Collection not found; ?session=secret-session'})});
+  f.pin('L01_V001', 1); f.element('global-task-select').value = 'kis';
+  await f.run('submit_to_dres_v2()');
+  assert.equal(f.requests.length, 1);
+  const report = f.saved.get('dresLastSubmissionError');
+  assert.doesNotMatch(report, /secret-session/);
+  const data = JSON.parse(report);
+  assert.equal(data.status, 500);
+  assert.equal(data.payload.answerSets[0].answers[0].mediaItemName, 'L01_V001');
+  assert.equal(data.endpoint, 'https://dres.example/api/v2/submit/evaluation-1');
+  assert.ok(f.messages.some(message => message.includes('ban tổ chức')));
+  assert.ok(f.messages.every(message => !message.includes('secret-session')));
+  assert.equal(f.element('submit-button').disabled, false);
+});
 
 test('QA answers remain separate across videos and fullscreen; deletion/reset clear old answers', async () => {
   const f = fixture();
