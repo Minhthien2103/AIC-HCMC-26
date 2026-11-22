@@ -294,6 +294,12 @@
             <button type="button" id="search-button" class="main-search-btn"><i class="fa fa-search"></i> Tìm kiếm (Enter)</button>
             <button type="button" id="filter-button" class="main-filter-btn"><i class="fa fa-filter"></i> Lọc Object</button>
           </div>
+          <div style="margin-top: 10px;">
+            <label for="asr-text-input">Lời thoại ASR (tùy chọn)</label>
+            <input id="asr-text-input" type="text" placeholder="Ví dụ: lễ hội, múa lân" aria-describedby="asr-help"
+              style="box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px;">
+            <small id="asr-help" style="display: block; color: #94a3b8;">Nhập lời nói tiếng Việt có dấu; dấu phẩy ngăn cách các cụm thay thế. Cộng điểm cho frame trong đoạn khớp, không thêm frame mới. Để trống để tắt. Nhấn Enter một lần cùng mô tả/OCR; nhiều sự kiện áp dụng cho frame sự kiện đầu.</small>
+          </div>
           <p id="query-error" role="alert" hidden style="color: #fca5a5; white-space: pre-wrap;"></p>
           <p id="query-translation" role="status" hidden style="margin-top: 10px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: anywhere;"></p>
           <details id="query-diagnostics" hidden style="margin-top: 10px; color: #cbd5e1;">
@@ -634,7 +640,7 @@
     <script src="src/scripts/object_list.js?v=3"></script>
     <script src="src/scripts/pagnition.js?v=7"></script>
     <script src="src/scripts/submit_dres.js?v=7"></script>
-    <script src="src/scripts/query_backend.js?v=8"></script>
+    <script src="src/scripts/query_backend.js?v=9"></script>
   </body>
 </html>
 

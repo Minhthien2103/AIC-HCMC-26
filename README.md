@@ -69,6 +69,11 @@ flowchart TD
     
     KeyframeImages --> EasyOCRExtract["EasyOCR GPU Text Extraction (Stride 4s)"]
     EasyOCRExtract --> OCRParquet["indexes/ocr_text.parquet (182.712 bản ghi, 6.86 MB)"]
+
+    RawVideos --> AudioExtract["FFmpeg trên Server: Audio mono 16 kHz"]
+    AudioExtract --> AudioPrefetch["SSH tải trước tối đa 1 video audio về local"]
+    AudioPrefetch --> ASRExtract["Zipformer ONNX int8 GPU (Batch 16, đoạn 15s chồng 2s)"]
+    ASRExtract --> ASRParquet["indexes/asr_segments.parquet (62.345 đoạn, 726 video; checkpoint/resume)"]
     
     CSVMaps["Map-Keyframe CSVs (Ban Tổ Chức)"] --> MetadataBuilder["Polars Metadata Loader"]
     MetadataBuilder --> MetadataParquet["indexes/metadata.parquet (734.544 dòng)"]
@@ -107,7 +112,13 @@ flowchart TD
     FAISSSearch --> ScoreFusion["Chuẩn hóa Điểm 0–1 & Metadata Join"]
     OCRSearch -.->|"Soft Boost một lần, chuẩn hóa về 0–1"| ScoreFusion
     
-    ScoreFusion --> CandidateList["Danh sách Khung hình tiềm năng"]
+    ScoreFusion --> ASRGate{"Có nhập lời thoại ASR?"}
+    UserQuery -.->|"Ô ASR tùy chọn; dấu phẩy ngăn cách các cụm"| ASRGate
+    ASRGate -- "Không: bỏ qua ASR" --> CandidateList["Danh sách Khung hình tiềm năng"]
+    ASRGate -- "Có" --> ASRSearch["Tra transcript local: indexes/asr_segments.parquet"]
+    ASRSearch --> ASRBoost["Chỉ boost ứng viên cùng video & đúng khoảng thời gian; không thêm frame"]
+    ASRBoost --> ASRScore["Có khớp: (S sau OCR + 0.2 × khớp) / 1.2; không khớp: giữ nguyên"]
+    ASRScore --> CandidateList
     CandidateList --> WebUI["Web UI hiển thị (Kèm Badge OCR cam)"]
     
     WebUI --> VLMRerankBtn["Người dùng bấm: ⚡ Rerank AI (Top 20)"]
@@ -314,7 +325,8 @@ AIC-HCMC-26/
 ├── indexes/                              # Thư mục chứa các file Database cốt lõi
 │   ├── faiss_siglip.index                # Chỉ mục FAISS 1152 chiều (3.38 GB)
 │   ├── metadata.parquet                  # Bảng metadata 734.544 frames (10 MB)
-│   └── ocr_text.parquet                  # Dữ liệu văn bản OCR (6.86 MB)
+│   ├── ocr_text.parquet                  # Dữ liệu văn bản OCR (6.86 MB)
+│   └── asr_segments.parquet              # Transcript ASR theo thời gian (62.345 đoạn)
 ├── scripts/                              # Các kịch bản trích xuất đặc trưng & setup
 │   ├── extract_siglip_features_gpu.py    # Trích xuất vector SigLIP trên GPU
 │   ├── extract_ocr_easyocr.py            # Trích xuất OCR bằng EasyOCR trên GPU
@@ -322,5 +334,3 @@ AIC-HCMC-26/
 │   └── MEDIA_SERVER.md                   # Hướng dẫn chi tiết chạy Media Server
 └── .opv/                                 # Chứa file cấu hình OpenVPN mạng trường (.ovpn)
 ```
-
----

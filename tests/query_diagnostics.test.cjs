@@ -17,6 +17,20 @@ function fixture(fetch) {
 }
 const payload = {kq:[{id:1}],query_preparation:[{source:'local_llm', english:['Cyclist number 71', 'A cyclist'], chunks:['Cyclist number 71'], token_counts:[5],token_limit:64,warnings:[]}]};
 
+test('ASR text is sent literally and missing transcripts are not hidden by cached results', async () => {
+  const requests=[];
+  const f=fixture(async(url, options)=>{
+    requests.push(JSON.parse(options.body));
+    return {ok:true,json:async()=>({...payload, asr_warning:'Chưa có transcript ASR'})};
+  });
+  await f.run("performSearchMulti(['festival'], '115', 'múa lân, lễ hội')");
+  await f.run("performSearchMulti(['festival'], '115', 'múa lân, lễ hội')");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].asr_text, 'múa lân, lễ hội');
+  assert.equal(requests[0].ocr_text, '115');
+  assert.match(f.get('query-error').textContent, /Chưa có transcript ASR/);
+});
+
 test('actual English query remains visible on a cache hit', async () => {
   let calls=0;
   const f=fixture(async()=>{calls++; return {ok:true,json:async()=>payload};});

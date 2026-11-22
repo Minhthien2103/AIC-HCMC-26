@@ -10,6 +10,7 @@ function handleEnterKeyPress(event) {
 
 // Show the exact strings encoded by the model, including fallback translations.
 function showQueryPreparation(payload, error = '') {
+  error = error || payload?.asr_warning || '';
   const errorElement = document.getElementById('query-error');
   if (errorElement) {
     errorElement.textContent = error;
@@ -37,7 +38,7 @@ function showQueryPreparation(payload, error = '') {
 }
 
 let latestTextRequest = 0;
-const performSearchMulti = debounce(async function (queries, ocrText = '') {
+const performSearchMulti = debounce(async function (queries, ocrText = '', asrText = '') {
   const requestId = ++latestTextRequest;
   if (currentAbortController) currentAbortController.abort();
   currentAbortController = null;
@@ -45,9 +46,9 @@ const performSearchMulti = debounce(async function (queries, ocrText = '') {
     toggleLoadingIndicator(false);
     return;
   }
-  const cacheKey = JSON.stringify([queries, ocrText]);
+  const cacheKey = JSON.stringify([queries, ocrText, asrText]);
   showQueryPreparation(null);
-  if (searchCache.has(cacheKey)) {
+  if (!asrText.trim() && searchCache.has(cacheKey)) {
     data = searchCache.get(cacheKey);
     updateUIWithSearchResults(data.kq);
     showQueryPreparation(data);
@@ -61,7 +62,7 @@ const performSearchMulti = debounce(async function (queries, ocrText = '') {
     const backendBase = (window.CONFIG && window.CONFIG.BACKEND_BASE) || window.BACKEND_BASE || 'http://localhost:8006';
     const response = await fetch(`${backendBase}/TextQuery`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({queries, ocr_text: ocrText, First_query: queries[0] || '', Next_query: queries[1] || ''}),
+      body: JSON.stringify({queries, ocr_text: ocrText, asr_text: asrText, First_query: queries[0] || '', Next_query: queries[1] || ''}),
       signal: controller.signal,
     });
     const payload = await response.json();
@@ -71,7 +72,7 @@ const performSearchMulti = debounce(async function (queries, ocrText = '') {
       throw new Error(`${detail}\nAPI: ${backendBase}/TextQuery`);
     }
     data = payload;
-    searchCache.set(cacheKey, payload);
+    if (!asrText.trim()) searchCache.set(cacheKey, payload);
     updateUIWithSearchResults(data.kq);
     showQueryPreparation(data);
   } catch (error) {
@@ -109,6 +110,7 @@ document.querySelectorAll('.Search_Scene textarea[name="Text_Query"]').forEach(t
 async function performSearchFromInputs() {
   toggleLoadingIndicator(true);
   const ocrText = document.getElementById("ocr-text-input")?.value.trim() || "";
+  const asrText = document.getElementById("asr-text-input")?.value?.trim() || "";
 
   // 1. Check if Scene 1 is in Image Mode (KIS-V Visual Search)
   const scene1 = document.getElementById('search-scene-1');
@@ -131,13 +133,14 @@ async function performSearchFromInputs() {
       const response = await fetch(`${backendBase}/mixed_query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: imageB64, text: textQuery, ocr_text: ocrText })
+        body: JSON.stringify({ image: imageB64, text: textQuery, ocr_text: ocrText, asr_text: asrText })
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const resJson = await response.json();
       data = resJson;
       updateUIWithSearchResults(resJson.kq);
+      showQueryPreparation(resJson);
     } catch (err) {
       console.error("[Visual Search Error]", err);
     } finally {
@@ -159,7 +162,7 @@ async function performSearchFromInputs() {
     return;
   }
 
-  performSearchMulti(queries, ocrText);
+  performSearchMulti(queries, ocrText, asrText);
 }
 
 window.performSearchFromInputs = performSearchFromInputs;
@@ -219,3 +222,4 @@ async function similaritySearch(img) {
 
 // Enter in the optional OCR field performs the same visual search.
 document.getElementById("ocr-text-input")?.addEventListener("keydown", handleEnterKeyPress);
+document.getElementById("asr-text-input")?.addEventListener("keydown", handleEnterKeyPress);

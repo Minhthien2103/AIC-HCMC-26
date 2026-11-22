@@ -47,6 +47,7 @@ from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.query_preparation import QueryPreparationError, prepare_english, prepare_chunks
 from src.online_pipeline.retrieval import RetrievalEngine
 from src.online_pipeline.text_search import TextSearchEngine
+from src.online_pipeline.asr_search import ASRSearchEngine
 from src.online_pipeline.vlm_reranker import VLMReranker
 from src.tasks.kis_t import KIStask
 from src.tasks.trake import TrakeTask
@@ -83,6 +84,7 @@ class MixedQueryRequest(BaseModel):
     image: Optional[str] = None  # Base64 encoded image
     text: Optional[str] = ""
     ocr_text: str = ""
+    asr_text: str = ""
 
 
 class DoubleImageQueryRequest(BaseModel):
@@ -198,6 +200,7 @@ class SearchService:
 
         # Cache of latest results for pagination
         self.last_results: List[Dict[str, Any]] = []
+        self.asr_search = ASRSearchEngine(Path(os.getenv('AIC_ASR_PATH', str(REPO_ROOT / 'indexes/asr_segments.parquet'))))
 
         logger.info("Service initialized successfully.")
 
@@ -605,7 +608,11 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
             ocr_text = data.get("ocr_text", "")
             if not isinstance(ocr_text, str):
                 raise HTTPException(status_code=422, detail="ocr_text must be a string")
+            asr_text = data.get('asr_text', '')
+            if not isinstance(asr_text, str):
+                raise HTTPException(status_code=422, detail='asr_text must be a string')
             results = service.process_multi_event_query(queries, ocr_text=ocr_text)
+            results, asr_warning = service.asr_search.boost(results, asr_text)
 
             # Optional VLM Reranking on Top-K if requested
             if (data.get("vlm_rerank", False) or getattr(config, "ENABLE_VLM_RERANK", False)) and service.vlm_reranker is not None:
@@ -633,6 +640,7 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
                 "queries": queries,
                 "expanded": expanded_info,
                 "query_preparation": preparations,
+                "asr_warning": asr_warning,
                 "total_results": len(results)
             }
         except (HTTPException, QueryPreparationError):
@@ -710,8 +718,9 @@ def create_app(llm_model: Optional[str] = None, vlm_model: Optional[str] = None)
     async def mixed_query_endpoint(req: MixedQueryRequest):
         try:
             results = service.mixed_search(req.image, req.text, ocr_text=req.ocr_text)
+            results, asr_warning = service.asr_search.boost(results, req.asr_text)
             service.last_results = results
-            return {"kq": results, "total_results": len(results)}
+            return {"kq": results, "total_results": len(results), "asr_warning": asr_warning}
         except Exception as e:
             logger.error(f"Error in /mixed_query: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
