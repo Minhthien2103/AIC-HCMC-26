@@ -192,6 +192,7 @@ body, html {
 
 
 .left-panel {
+    box-sizing: border-box;
     flex: 0 0 auto;
     width: 15.5%;
     min-width: 80px;

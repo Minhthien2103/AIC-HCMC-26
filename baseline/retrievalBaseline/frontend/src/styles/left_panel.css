@@ -2,9 +2,9 @@
 /* content in left panel */
 
 .Box_Function {
-    display: fixed;
-    flex: 1;
-    overflow-y: auto;
+    display: block;
+    flex: 0 0 auto;
+    overflow: visible;
     scrollbar-width: none; 
 }
 
@@ -427,15 +427,15 @@ input[type="number"] {
 /* Button in the bottom */
 
 .button-card {
-    position: sticky;
-    bottom: 0;
+    position: static;
+    flex: 0 0 auto;
     background-color: var(--card-background);
     border-radius: 8px 8px 0 0;
     box-shadow: 0 -4px 6px rgba(0, 0, 0, 0.1);
     padding: 0.5rem 1rem 1rem 1rem;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: stretch;
     /* z-index: 1; */
     display: flex;
     gap: 0.5rem;
@@ -445,8 +445,31 @@ input[type="number"] {
 
 .button-group {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
-    width: 70%;
+    width: 100%;
+}
+
+.search-support-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.search-support-field input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 10px;
+    background: #1e293b;
+    color: #f8fafc;
+    border: 1px solid #475569;
+    border-radius: 6px;
+}
+
+.search-support-field small {
+    color: #94a3b8;
+    line-height: 1.4;
 }
 
 .button-group button {
@@ -459,6 +482,7 @@ input[type="number"] {
 }
 
 #search-button {
+    min-width: min(100%, 145px);
     border: none;
     background-color: #6F4E37;
     cursor: pointer;
@@ -469,6 +493,7 @@ input[type="number"] {
 }
 
 #filter-button {
+    min-width: min(100%, 96px);
     border: none;
     background-color: #B38867;;
     cursor: pointer;

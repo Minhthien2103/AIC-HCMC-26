@@ -10,8 +10,8 @@
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <link rel="stylesheet" href="src/styles/layout.css" />
-    <link rel="stylesheet" href="src/styles/left_panel.css" />
+    <link rel="stylesheet" href="src/styles/layout.css?v=2" />
+    <link rel="stylesheet" href="src/styles/left_panel.css?v=2" />
     <link rel="stylesheet" href="src/styles/right_panel.css" />
     <link rel="stylesheet" href="src/styles/object_filter.css" />
     <link rel="stylesheet" href="src/styles/show_video.css?v=2" />
@@ -283,22 +283,20 @@
         </div>
 
         <div class="button-card">
-          <div style="margin-bottom: 12px;">
-            <label for="ocr-text-input">Chữ cần tìm trong ảnh (OCR, tùy chọn)</label>
+          <div class="search-support-field">
+            <label for="ocr-text-input">Hỗ trợ OCR (tùy chọn)</label>
             <input type="text" id="ocr-text-input" placeholder="VD: 115, ambulance"
-              aria-describedby="ocr-text-help"
-              style="box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px;">
-            <small id="ocr-text-help" style="display: block; margin-top: 6px; color: #94a3b8;">Ngăn cách các từ/cụm chữ bằng dấu phẩy. Khớp ít nhất một cụm sẽ được cộng điểm một lần. Điền mô tả và OCR rồi nhấn Enter một lần để tìm. Để trống OCR để dùng cơ chế tự động. Với nhiều sự kiện, OCR áp dụng cho ảnh sự kiện đầu tiên.</small>
+              aria-describedby="ocr-text-help">
+            <small id="ocr-text-help">Điền mô tả và OCR rồi nhấn Enter một lần để tìm.</small>
+          </div>
+          <div class="search-support-field">
+            <label for="asr-text-input">Hỗ trợ ASR (tùy chọn)</label>
+            <input id="asr-text-input" type="text" placeholder="Ví dụ: lễ hội, múa lân" aria-describedby="asr-help">
+            <small id="asr-help">Nhấn Enter một lần cùng mô tả/OCR.</small>
           </div>
           <div class="button-group">
             <button type="button" id="search-button" class="main-search-btn"><i class="fa fa-search"></i> Tìm kiếm (Enter)</button>
             <button type="button" id="filter-button" class="main-filter-btn"><i class="fa fa-filter"></i> Lọc Object</button>
-          </div>
-          <div style="margin-top: 10px;">
-            <label for="asr-text-input">Lời thoại ASR (tùy chọn)</label>
-            <input id="asr-text-input" type="text" placeholder="Ví dụ: lễ hội, múa lân" aria-describedby="asr-help"
-              style="box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px;">
-            <small id="asr-help" style="display: block; color: #94a3b8;">Nhập lời nói tiếng Việt có dấu; dấu phẩy ngăn cách các cụm thay thế. Cộng điểm cho frame trong đoạn khớp, không thêm frame mới. Để trống để tắt. Nhấn Enter một lần cùng mô tả/OCR; nhiều sự kiện áp dụng cho frame sự kiện đầu.</small>
           </div>
           <p id="query-error" role="alert" hidden style="color: #fca5a5; white-space: pre-wrap;"></p>
           <p id="query-translation" role="status" hidden style="margin-top: 10px; color: #e2e8f0; white-space: pre-wrap; overflow-wrap: anywhere;"></p>
@@ -306,7 +304,6 @@
             <summary>Truy vấn thực tế dùng để tìm</summary>
             <pre id="query-diagnostics-text" style="white-space: pre-wrap; overflow-wrap: anywhere; font: inherit;"></pre>
           </details>
-          <small style="display: block; margin-top: 8px; color: #94a3b8;">Nhập tiếng Việt có dấu hoặc tiếng Anh. Nếu bản dịch sai, thay mô tả bằng bản tiếng Anh đã sửa rồi tìm lại.</small>
         </div>
         </div>
         
