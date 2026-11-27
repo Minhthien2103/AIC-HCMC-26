@@ -23,7 +23,9 @@ function toggleQuickSearchMode() {
 // Add this to your DOMContentLoaded event listener
 document.addEventListener('DOMContentLoaded', function() {
     const openExportSocketButton = document.getElementById('quick-search');
-    openExportSocketButton.addEventListener('click', toggleQuickSearchMode);
+    if (openExportSocketButton) {
+        openExportSocketButton.addEventListener('click', toggleQuickSearchMode);
+    }
 });
   
   

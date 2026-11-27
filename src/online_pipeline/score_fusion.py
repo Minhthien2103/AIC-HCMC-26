@@ -82,3 +82,40 @@ def temporal_neighborhood_boost(candidates, window_seconds=6.0, neighbor_weight=
     for item, neighborhood in zip(items, neighborhoods):
         item['score'] = unit_score((item['score'] + neighbor_weight * neighborhood) / (1.0 + neighbor_weight))
     return [item for _, item in sorted(enumerate(items), key=lambda pair: (-pair[1]['score'], pair[0]))]
+
+
+def score_local_video_frames(per_variant_rankings, weights, scale=0.40, cosine_floor=0.05, cosine_span=0.25):
+    """Combine per-variant in-video cosine scores into a conservative [0, scale] range."""
+    if not per_variant_rankings or not weights or scale <= 0 or cosine_span <= 0:
+        return []
+    branch_weights = [max(0.0, float(w)) for w in weights[:len(per_variant_rankings)]]
+    total_weight = sum(branch_weights)
+    if total_weight <= 0:
+        return []
+    branch_weights = [w / total_weight for w in branch_weights]
+
+    merged = {}
+    for ranking, weight in zip(per_variant_rankings, branch_weights):
+        if weight == 0:
+            continue
+        seen = set()
+        for candidate in ranking:
+            key = candidate.get('faiss_idx')
+            if key is None:
+                key = (candidate.get('video_id'), str(candidate.get('frame_id', candidate.get('keyframe_name'))))
+            if key in seen:
+                continue
+            seen.add(key)
+            entry = merged.setdefault(key, {'row': dict(candidate), 'cos': 0.0})
+            entry['cos'] += weight * float(candidate.get('score', 0.0))
+
+    scored = []
+    for entry in merged.values():
+        local_unit = unit_score((entry['cos'] - cosine_floor) / cosine_span)
+        if local_unit <= 0:
+            continue
+        row = entry['row']
+        row['score'] = scale * local_unit
+        row['score_space'] = 'unit'
+        scored.append(row)
+    return sorted(scored, key=lambda c: -c['score'])

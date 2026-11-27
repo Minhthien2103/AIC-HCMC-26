@@ -36,6 +36,10 @@ test('MP4 opens without HLS and seeks only after metadata; repeated previews reu
   video.readyState = 1;
   video.listeners.loadedmetadata[0]();
   assert.equal(video.currentTime, 42);
+  elements.rewindBtn.listeners.click[0]();
+  assert.equal(video.currentTime, 37);
+  elements.forwardBtn.listeners.click[0]();
+  assert.equal(video.currentTime, 42);
   video.listeners.error[0]();
   assert.ok(elements['video-status'].textContent.length > 0);
 });

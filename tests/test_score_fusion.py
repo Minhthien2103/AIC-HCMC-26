@@ -12,6 +12,7 @@ from src.online_pipeline.query_preparation import prepare_english, prepare_chunk
 from src.online_pipeline.diverse_candidates import select_diverse_indices
 from src.online_pipeline.score_fusion import (
     weighted_rrf, normalized_score, unit_score, temporal_neighborhood_boost,
+    score_local_video_frames,
 )
 from test_manual_ocr_service import namespace
 
@@ -118,6 +119,61 @@ class FusionTests(unittest.TestCase):
                                next(c['score'] for c in result if c['video_id'] == 'V_SPARSE'))
         notime = next(c for c in result if c['video_id'] == 'V_NOTIME')
         self.assertAlmostEqual(notime['score'], 0.30 / 1.25)
+
+    def test_temporal_query_rescues_missing_r2_via_local_video_search(self):
+        service = namespace['SearchService'].__new__(namespace['SearchService'])
+        service.query_preparations = {'event2': {'weights': [0.7, 0.2, 0.1]}}
+        service.encode_query_variants = lambda q: ('vecs2', ['v1', 'v2', 'v3'])
+        service.format_results = lambda rows, limit: rows[:limit]
+        service.apply_ocr_boost = lambda rows, q, ocr='': rows
+
+        r1 = [
+            dict(video_id='V_BOTH_GLOBAL', keyframe_name='001', frame_id=100, pts_time=4.0, score=0.75, score_space='unit'),
+            dict(video_id='V_ONLY_R1', keyframe_name='001', frame_id=100, pts_time=4.0, score=0.90, score_space='unit'),
+            dict(video_id='V_LOCAL_R2', keyframe_name='001', frame_id=100, pts_time=4.0, score=0.80, score_space='unit'),
+        ]
+        r2 = [
+            dict(video_id='V_BOTH_GLOBAL', keyframe_name='005', frame_id=200, pts_time=8.0, score=0.70, score_space='unit'),
+            # Out of forward window (before frame1): should trigger local rescue check.
+            dict(video_id='V_LOCAL_R2', keyframe_name='000', frame_id=50, pts_time=2.0, score=0.60, score_space='unit'),
+        ]
+        service.retrieve_text = lambda q, top_k=1000: r1 if q == 'event1' else r2
+
+        searched_videos = []
+        def search_in_video_batch(vecs, video_id, top_k):
+            searched_videos.append(video_id)
+            if video_id == 'V_LOCAL_R2':
+                return [
+                    [dict(video_id='V_LOCAL_R2', keyframe_name='004', frame_id=150, pts_time=6.0, score=0.25)],
+                    [dict(video_id='V_LOCAL_R2', keyframe_name='004', frame_id=150, pts_time=6.0, score=0.20)],
+                    [dict(video_id='V_LOCAL_R2', keyframe_name='004', frame_id=150, pts_time=6.0, score=0.20)],
+                ]
+            # Unrelated video has only low noise cosine <= 0.05, should not boost.
+            return [
+                [dict(video_id=video_id, keyframe_name='002', frame_id=120, pts_time=4.8, score=0.03)],
+                [dict(video_id=video_id, keyframe_name='002', frame_id=120, pts_time=4.8, score=0.02)],
+                [dict(video_id=video_id, keyframe_name='002', frame_id=120, pts_time=4.8, score=0.02)],
+            ]
+
+        service.retriever = SimpleNamespace(search_in_video_batch=search_in_video_batch)
+        result = service.process_temporal_query('event1', 'event2', top_k=10)
+        # V_BOTH_GLOBAL already matched global r2, so only V_ONLY_R1 and V_LOCAL_R2 needed local search.
+        self.assertEqual(searched_videos, ['V_ONLY_R1', 'V_LOCAL_R2'])
+        self.assertEqual([r['video_id'] for r in result], ['V_BOTH_GLOBAL', 'V_LOCAL_R2', 'V_ONLY_R1'])
+        self.assertAlmostEqual(result[2]['score'], 0.45)
+
+    def test_score_local_video_frames_filters_noise_and_bounds_score(self):
+        rows = score_local_video_frames(
+            [[dict(video_id='V', frame_id=1, score=0.35)], [dict(video_id='V', frame_id=1, score=0.35)]],
+            [0.7, 0.3],
+            scale=0.40,
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]['score'], 0.40)
+        self.assertEqual(
+            score_local_video_frames([[dict(video_id='V', frame_id=1, score=0.04)]], [1.0], scale=0.40),
+            [],
+        )
 
 
 class RerankTests(unittest.TestCase):

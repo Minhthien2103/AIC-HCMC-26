@@ -16,8 +16,8 @@ class VideoPlayer {
             'Không tải được video. Kiểm tra đường dẫn, kết nối media server hoặc định dạng video.'));
         this.video.addEventListener('waiting', () => this.setStatus('Đang tải video…'));
         this.video.addEventListener('playing', () => this.setStatus(''));
-        document.getElementById('rewindBtn')?.addEventListener('click', () => this.skip(-10));
-        document.getElementById('forwardBtn')?.addEventListener('click', () => this.skip(10));
+        document.getElementById('rewindBtn')?.addEventListener('click', () => this.skip(-5));
+        document.getElementById('forwardBtn')?.addEventListener('click', () => this.skip(5));
         document.getElementById('initialTimeBtn')?.addEventListener('click', () => this.seek(this.initialTime));
         this.load(videoSrc, initialTime);
     }

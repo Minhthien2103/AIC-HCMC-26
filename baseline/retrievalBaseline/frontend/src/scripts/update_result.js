@@ -149,13 +149,23 @@ function getCurrentResults() {
 }
 
 
-// Group the results by video
+// Group the results by video while keeping insertion order (highest-ranked video first).
 function groupResultsByVideo(results) {
-  return results.reduce((groups, result) => {
+  return results.reduce((groups, result, index) => {
       const videoName = result.entity.video;
-      (groups[videoName] = groups[videoName] || []).push(result);
+      (groups[videoName] = groups[videoName] || []).push({ result, rankIndex: index + 1 });
       return groups;
   }, {});
+}
+
+function getRowsSortMode() {
+  const select = document.getElementById('rows-sort-select');
+  if (select && (select.value === 'rank' || select.value === 'time')) return select.value;
+  try {
+    return localStorage.getItem('rowsSortMode') === 'time' ? 'time' : 'rank';
+  } catch {
+    return 'rank';
+  }
 }
 
 // Update the new right panel
@@ -164,11 +174,12 @@ function updateRightPanel_rows(results) {
   imagesRows.querySelectorAll('img').forEach(img => imageObserver.unobserve(img));
   imagesRows.innerHTML = ''; // Clear existing content
 
+  const sortMode = getRowsSortMode();
   const videoGroups = groupResultsByVideo(results);
   
   const fragment = document.createDocumentFragment();
 
-  Object.entries(videoGroups).forEach(([videoName, videoResults], index) => {
+  Object.entries(videoGroups).forEach(([videoName, entries], index) => {
       const videoSection = document.createElement('div');
       videoSection.className = 'group-frame';
 
@@ -180,10 +191,22 @@ function updateRightPanel_rows(results) {
       videoTitle.textContent = videoName;
       videoSection.appendChild(videoTitle);
 
+      const bestRankIndex = entries[0]?.rankIndex;
+      const orderedEntries = sortMode === 'time'
+          ? [...entries].sort((a, b) => {
+              const tA = Number(a.result?.entity?.time);
+              const tB = Number(b.result?.entity?.time);
+              if (Number.isFinite(tA) && Number.isFinite(tB) && tA !== tB) return tA - tB;
+              return a.rankIndex - b.rankIndex;
+          })
+          : entries;
+
       const resultFragment = document.createDocumentFragment();
-      videoResults.forEach((result) => {
-          const originalIndex = results.findIndex(r => r.id === result.id);
-          const imgDiv = createImageDiv(result, originalIndex + 1);
+      orderedEntries.forEach(({ result, rankIndex }) => {
+          const imgDiv = createImageDiv(result, rankIndex);
+          if (sortMode === 'time' && rankIndex === bestRankIndex) {
+              imgDiv.classList.add('top-row-match');
+          }
           resultFragment.appendChild(imgDiv);
           imageObserver.observe(imgDiv.querySelector('img'));
       });
@@ -196,6 +219,24 @@ function updateRightPanel_rows(results) {
 
   imagesRows.scrollTop = 0;
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const rowsSortSelect = document.getElementById('rows-sort-select');
+  if (!rowsSortSelect) return;
+  try {
+    const saved = localStorage.getItem('rowsSortMode');
+    if (saved === 'rank' || saved === 'time') rowsSortSelect.value = saved;
+  } catch {}
+  rowsSortSelect.addEventListener('change', () => {
+    try { localStorage.setItem('rowsSortMode', rowsSortSelect.value); } catch {}
+    if (Array.isArray(window.currentSearchResults) && window.currentSearchResults.length > 0) {
+      updateRightPanel_rows(window.currentSearchResults);
+      document.querySelectorAll('#images-rows .img-dis').forEach(container => {
+        container.addEventListener('mousedown', handleMiddleClick);
+      });
+    }
+  });
+});
 
 // Update both panels
 function updateUIWithSearchResults(results) {

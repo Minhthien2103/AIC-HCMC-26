@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import unittest
 from src.online_pipeline.score_fusion import (
     normalized_score, unit_score, weighted_rrf, temporal_neighborhood_boost,
+    score_local_video_frames,
 )
 
 
@@ -17,7 +18,8 @@ service_node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.na
 namespace = {'config': SimpleNamespace(ENABLE_OCR_SEARCH=True, AUTO_OCR_EXTRACTION=False, OCR_BOOST_WEIGHT=0.35),
              'logger': logging.getLogger(__name__), 'normalized_score': normalized_score,
              'unit_score': unit_score, 'weighted_rrf': weighted_rrf,
-             'temporal_neighborhood_boost': temporal_neighborhood_boost}
+             'temporal_neighborhood_boost': temporal_neighborhood_boost,
+             'score_local_video_frames': score_local_video_frames}
 exec(compile('from __future__ import annotations\n' + ast.unparse(service_node), 'SearchService', 'exec'), namespace)
 
 

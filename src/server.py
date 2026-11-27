@@ -41,7 +41,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import config
-from src.online_pipeline.score_fusion import weighted_rrf, normalized_score, temporal_neighborhood_boost
+from src.online_pipeline.score_fusion import (
+    weighted_rrf, normalized_score, temporal_neighborhood_boost, score_local_video_frames,
+)
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.query_preparation import QueryPreparationError, prepare_english, prepare_chunks
@@ -328,6 +330,61 @@ class SearchService:
         candidates = self.apply_ocr_boost(candidates, query, ocr_text)
         return self.format_results(candidates, limit=top_k)
 
+    def _populate_missing_temporal_r2(
+        self,
+        r1: List[Dict[str, Any]],
+        r2_by_vid: Dict[str, List[Dict[str, Any]]],
+        second_query: str,
+        max_frame_gap: int,
+    ) -> None:
+        """Search Event 2 inside top Event 1 videos that missed global top-K."""
+        search_in_video_batch = getattr(self.retriever, "search_in_video_batch", None)
+        encode_variants = getattr(self, "encode_query_variants", None)
+        if not callable(search_in_video_batch) or not callable(encode_variants):
+            return
+        video_budget = max(0, int(getattr(config, "TEMPORAL_LOCAL_VIDEO_BUDGET", 40)))
+        if video_budget == 0:
+            return
+
+        r1_frames_by_vid: Dict[str, List[int]] = {}
+        candidate_vids: List[str] = []
+        for item in r1:
+            vid = item.get("video_id", "")
+            if not vid:
+                continue
+            if vid not in r1_frames_by_vid:
+                if len(candidate_vids) >= video_budget:
+                    continue
+                r1_frames_by_vid[vid] = []
+                candidate_vids.append(vid)
+            r1_frames_by_vid[vid].append(int(item.get("frame_id", 0)))
+
+        missing_vids = [
+            vid for vid in candidate_vids
+            if not any(
+                0 < int(target.get("frame_id", 0)) - f1 <= max_frame_gap
+                for f1 in r1_frames_by_vid[vid]
+                for target in r2_by_vid.get(vid, ())
+            )
+        ]
+        if not missing_vids:
+            return
+
+        vecs2, variations = encode_variants(second_query)
+        if not variations:
+            return
+        weights2 = getattr(self, "query_preparations", {}).get(second_query.strip(), {}).get("weights")
+        if not weights2:
+            weights2 = getattr(config, "EXPANSION_WEIGHTS", [1.0])
+        frame_budget = max(1, int(getattr(config, "TEMPORAL_LOCAL_FRAME_BUDGET", 1000)))
+        local_scale = float(getattr(config, "TEMPORAL_LOCAL_R2_SCALE", 0.40))
+
+        for vid in missing_vids:
+            per_variant = search_in_video_batch(vecs2, video_id=vid, top_k=frame_budget)
+            scored = score_local_video_frames(per_variant, weights2, scale=local_scale)
+            if scored:
+                r2_by_vid.setdefault(vid, []).extend(scored)
+
     def process_temporal_query(
         self,
         first_query: str,
@@ -351,6 +408,10 @@ class SearchService:
 
         # Score boost for chronological temporal proximity (event 2 follows event 1 in same video)
         MAX_FRAME_GAP = 1500  # ~50 seconds at 30fps
+
+        # Rescue r1 candidate videos that missed global r2 top-K via local in-video search.
+        self._populate_missing_temporal_r2(r1, r2_by_vid, second_query, MAX_FRAME_GAP)
+
         boosted: List[Dict[str, Any]] = []
 
         for item in r1:

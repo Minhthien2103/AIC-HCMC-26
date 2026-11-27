@@ -21,7 +21,7 @@
     <link rel="stylesheet" href="src/styles/export_area.css" />
     <link rel="stylesheet" href="src/styles/preview.css" />
     <link rel="stylesheet" href="src/styles/object_list.css" />
-    <link rel="stylesheet" href="src/styles/dark_theme.css?v=11" />
+    <link rel="stylesheet" href="src/styles/dark_theme.css?v=12" />
 
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
@@ -84,9 +84,13 @@
           <i class="fa fa-magic"></i> ⚡ Rerank AI (Top 20)
         </button>
 
-        <button class="nav-btn" id="quick-search" title="Bật/Tắt cuộn trang vô tận">
-          <i class="fa fa-bolt"></i> Cuộn nhanh
-        </button>
+        <div class="task-selector-wrapper rows-sort-wrapper" title="Cách sắp xếp các keyframe bên trong mỗi hàng video (chế độ Hàng)">
+          <label for="rows-sort-select"><i class="fa fa-sort-amount-down"></i> Hàng:</label>
+          <select id="rows-sort-select" class="task-dropdown">
+            <option value="rank" selected>Theo hạng</option>
+            <option value="time">Theo thời gian</option>
+          </select>
+        </div>
 
         <div class="mode-toggle-group" title="Chuyển chế độ xem Lưới / Theo Video">
           <span>Lưới</span>
@@ -489,9 +493,9 @@
         <div id="video-status" role="status" style="color: white; padding: 4px 12px;"></div>
         <a id="video-direct-link" target="_blank" rel="noopener" style="display: block; padding: 4px 12px;">Mở video trực tiếp</a>
         <div class="custom-controls">
-          <button id="rewindBtn"><i class="fas fa-backward"></i></button>
-          <button id="initialTimeBtn"><i class="fas fa-redo"></i></button>
-          <button id="forwardBtn"><i class="fas fa-forward"></i></button>
+          <button id="rewindBtn" title="Tua lùi 5 giây"><i class="fas fa-backward"></i></button>
+          <button id="initialTimeBtn" title="Về thời điểm frame ban đầu"><i class="fas fa-redo"></i></button>
+          <button id="forwardBtn" title="Tua tới 5 giây"><i class="fas fa-forward"></i></button>
       </div>
       </div>
     </div>
@@ -626,16 +630,16 @@
     <script src="src/scripts/web_socket.js?v=6"></script>
     <script src="src/websocket/multi_combined_search.js?v=3"></script>
     <script src="src/scripts/start_ui.js?v=3"></script>
-    <script src="src/scripts/update_result.js?v=10"></script>
+    <script src="src/scripts/update_result.js?v=11"></script>
     <script src="src/scripts/dice.js?v=3"></script>
-    <script src="src/scripts/show_video.js?v=5"></script>
+    <script src="src/scripts/show_video.js?v=6"></script>
     <script src="src/scripts/show_videoframe.js?v=8"></script>
     <script src="src/scripts/export.js?v=9"></script>
     <script src="src/scripts/group_search.js?v=3"></script>
     <script src="src/scripts/left_panel.js?v=5"></script>
     <script src="src/scripts/queries_history.js?v=3"></script>
     <script src="src/scripts/object_list.js?v=3"></script>
-    <script src="src/scripts/pagnition.js?v=10"></script>
+    <script src="src/scripts/pagnition.js?v=11"></script>
     <script src="src/scripts/submit_dres.js?v=10"></script>
     <script src="src/scripts/query_backend.js?v=9"></script>
   </body>
