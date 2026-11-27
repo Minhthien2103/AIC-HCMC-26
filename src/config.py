@@ -58,6 +58,7 @@ LLM_DEVICE = os.getenv("AIC_LLM_DEVICE", "cuda").lower()
 
 # ── OCR Text Search & Boosting Configuration ────────────────────────────────
 ENABLE_OCR_SEARCH = os.getenv("AIC_ENABLE_OCR_SEARCH", "true").lower() == "true"
+AUTO_OCR_EXTRACTION = os.getenv("AIC_AUTO_OCR_EXTRACTION", "false").lower() == "true"
 OCR_PARQUET_PATH = INDEX_DIR / "ocr_text.parquet"
 OCR_BOOST_WEIGHT = float(os.getenv("AIC_OCR_BOOST_WEIGHT", "0.35"))
 
@@ -78,6 +79,9 @@ VLM_IMAGE_WORKERS = int(os.getenv("AIC_VLM_IMAGE_WORKERS", "4"))  # Clamped to 1
 # [2]: Key objects, colors, and visual tags
 EXPANSION_WEIGHTS = [float(w) for w in os.getenv("AIC_EXPANSION_WEIGHTS", "0.7,0.2,0.1").split(",")]
 RRF_RANK_CONSTANT = float(os.getenv("AIC_RRF_RANK_CONSTANT", "60"))
+TEMPORAL_NEIGHBOR_WINDOW = float(os.getenv("AIC_TEMPORAL_NEIGHBOR_WINDOW", "6.0"))
+TEMPORAL_NEIGHBOR_WEIGHT = float(os.getenv("AIC_TEMPORAL_NEIGHBOR_WEIGHT", "0.25"))
+TEMPORAL_NEIGHBOR_MAX_COUNT = int(os.getenv("AIC_TEMPORAL_NEIGHBOR_MAX_COUNT", "2"))
 
 # Weights for mixed search (Image + Text)
 MIXED_IMAGE_WEIGHT = float(os.getenv("AIC_MIXED_IMAGE_WEIGHT", "0.5"))

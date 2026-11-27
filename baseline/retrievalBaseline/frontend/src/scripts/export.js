@@ -134,6 +134,7 @@ function createPinnedElement(img, index, fullscreen = false) {
   const container = document.createElement('div');
   container.className = fullscreen ? 'export-item' : 'export-image-container';
   const picture = document.createElement('img');
+  // img is normalized frame metadata, not an HTMLImageElement.
   picture.src = img.src;
   picture.className = 'export-image';
   registerFrameMetadata(picture, img);

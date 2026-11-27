@@ -10,7 +10,9 @@ from unittest.mock import patch
 from src.online_pipeline.query_preparation import prepare_english, prepare_chunks
 
 from src.online_pipeline.diverse_candidates import select_diverse_indices
-from src.online_pipeline.score_fusion import weighted_rrf, normalized_score, unit_score
+from src.online_pipeline.score_fusion import (
+    weighted_rrf, normalized_score, unit_score, temporal_neighborhood_boost,
+)
 from test_manual_ocr_service import namespace
 
 
@@ -85,6 +87,37 @@ class FusionTests(unittest.TestCase):
             vectors, texts = service.encode_query_variants('input')
         self.assertEqual(texts, ['A bicycle racer'])
         self.assertEqual(vectors, [[1, 0]])
+
+    def test_temporal_neighborhood_boost_promotes_clustered_scene_over_outlier(self):
+        candidates = [
+            dict(video_id='V_OUTLIER', keyframe_name='010', pts_time=10.0, score=0.50, score_space='unit'),
+            dict(video_id='V_SCENE', keyframe_name='040', pts_time=40.0, score=0.46, score_space='unit'),
+            dict(video_id='V_SCENE', keyframe_name='041', pts_time=41.0, score=0.45, score_space='unit'),
+            dict(video_id='V_SCENE', keyframe_name='042', pts_time=42.0, score=0.44, score_space='unit'),
+            dict(video_id='V_FAR', keyframe_name='090', pts_time=90.0, score=0.49, score_space='unit'),
+            dict(video_id='V_FAR', keyframe_name='120', pts_time=120.0, score=0.48, score_space='unit'),
+        ]
+        boosted = temporal_neighborhood_boost(candidates, window_seconds=6.0, neighbor_weight=0.25, max_neighbors=2)
+        self.assertEqual(boosted[0]['video_id'], 'V_SCENE')
+        self.assertEqual(boosted[0]['keyframe_name'], '041')
+        outlier = next(c for c in boosted if c['video_id'] == 'V_OUTLIER')
+        far = next(c for c in boosted if c['video_id'] == 'V_FAR' and c['keyframe_name'] == '090')
+        self.assertAlmostEqual(outlier['score'], 0.50 / 1.25)
+        self.assertAlmostEqual(far['score'], 0.49 / 1.25)
+        self.assertTrue(all(0.0 <= c['score'] <= 1.0 for c in boosted))
+
+    def test_temporal_neighborhood_boost_caps_dense_neighbors_and_handles_missing_time(self):
+        dense = [dict(video_id='V_DENSE', keyframe_name=f'{i:03d}', pts_time=10.0 + i * 0.1, score=0.40, score_space='unit')
+                 for i in range(10)]
+        sparse = [dict(video_id='V_SPARSE', keyframe_name='001', pts_time=10.0, score=0.40, score_space='unit'),
+                  dict(video_id='V_SPARSE', keyframe_name='002', pts_time=10.1, score=0.40, score_space='unit'),
+                  dict(video_id='V_SPARSE', keyframe_name='003', pts_time=10.2, score=0.40, score_space='unit'),
+                  dict(video_id='V_NOTIME', keyframe_name='001', pts_time=None, score=0.30, score_space='unit')]
+        result = temporal_neighborhood_boost(dense + sparse, window_seconds=6.0, neighbor_weight=0.25, max_neighbors=2)
+        self.assertAlmostEqual(result[0]['score'],
+                               next(c['score'] for c in result if c['video_id'] == 'V_SPARSE'))
+        notime = next(c for c in result if c['video_id'] == 'V_NOTIME')
+        self.assertAlmostEqual(notime['score'], 0.30 / 1.25)
 
 
 class RerankTests(unittest.TestCase):

@@ -5,6 +5,7 @@ class VideoPlayer {
         this.initialTime = 0;
         this.pendingSeek = null;
         this.video.addEventListener('loadedmetadata', () => {
+            if (document.getElementById('Details').style.display === 'none') return;
             if (this.pendingSeek !== null) {
                 this.seek(this.pendingSeek);
                 this.pendingSeek = null;
@@ -84,14 +85,23 @@ async function showVideo(img) {
     await openVideoPreview(entity.video, entity.time);
 }
 
+// Release the media resource so a hidden preview cannot keep buffering over VPN.
+function closeVideoPreview() {
+    document.getElementById('Details').style.display = 'none';
+    const player = document.getElementById('vid_details');
+    player.pause();
+    if (player.playerInstance) player.playerInstance.pendingSeek = null;
+    player.removeAttribute('src');
+    player.load();
+}
+
 // Close video details when Escape key is pressed
 document.addEventListener("keydown", event => {
     if (event.key === 'Escape') {
         event.preventDefault();
         const detailsDiv = document.getElementById('Details');
         if (detailsDiv.style.display === 'block') {
-            detailsDiv.style.display = 'none';
-            document.getElementById('vid_details')?.pause(); // Pause video if open
+            closeVideoPreview();
         }
     }
 });
@@ -102,15 +112,13 @@ const modal= document.getElementById("Details")
 const video= document.getElementById("vid_details")
 
 document.getElementsByClassName("close")[0]?.addEventListener("click", () => {
-    modal.style.display = "none";
-    video.pause();
+    closeVideoPreview();
 });
 
 
 window.addEventListener("click", function(event){
     if (event.target == modal) {
-        modal.style.display = "none";
-        video.pause();
+        closeVideoPreview();
     }
 });
 

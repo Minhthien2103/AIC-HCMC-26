@@ -71,11 +71,17 @@ def normalize_cultural_terms(translated, original):
 def expansion_messages(primary):
     return [
         {'role': 'system', 'content': (
-            'Create exactly two concise English paraphrases of the supplied image-search query. '
-            'Preserve EVERY subject, color, count, action, negation and relationship. '
-            'Do not guess gender, setting or objects. Do not replace unfamiliar names. '
-            'When unsure, repeat the input. Return exactly ONE JSON object with two string values: '
-            '{"paraphrase1":"first English paraphrase","paraphrase2":"second English paraphrase"}. '
+            'Given an English video-frame search query, produce two complementary visual search phrases '
+            'to help a vision-language encoder (SigLIP) retrieve the exact shot.\n'
+            '- "paraphrase1": A concise, direct core-scene phrase (<= 22 words) focusing on WHO is doing WHAT '
+            '(main subjects, core action/pose, count, spatial relation, and critical negation), stripping filler words.\n'
+            '- "paraphrase2": A concise phrase listing distinctive visual cues present in the query '
+            '(clothing colors, held objects, vehicles, props, setting/background, visible text/numbers).\n'
+            'Strict rules: Preserve EVERY subject, color, count, negation and relationship. '
+            'NEVER invent new objects, colors, gender, locations or actions. Do NOT alter proper names or cultural terms. '
+            'If the input is already very short, keep both concise and faithful without padding. '
+            'Return exactly ONE JSON object with two string values: '
+            '{"paraphrase1":"core subject and action","paraphrase2":"distinctive visual cues and setting"}. '
             'Do not return arrays, multiple JSON objects, or explanations.'
         )},
         {'role': 'user', 'content': primary},

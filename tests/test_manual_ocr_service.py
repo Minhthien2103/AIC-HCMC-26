@@ -7,14 +7,17 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from src.online_pipeline.score_fusion import normalized_score, unit_score, weighted_rrf
+from src.online_pipeline.score_fusion import (
+    normalized_score, unit_score, weighted_rrf, temporal_neighborhood_boost,
+)
 
 
 tree = ast.parse((Path(__file__).resolve().parents[1] / 'src/server.py').read_text(encoding='utf-8'))
 service_node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'SearchService')
-namespace = {'config': SimpleNamespace(ENABLE_OCR_SEARCH=True, OCR_BOOST_WEIGHT=0.35),
+namespace = {'config': SimpleNamespace(ENABLE_OCR_SEARCH=True, AUTO_OCR_EXTRACTION=False, OCR_BOOST_WEIGHT=0.35),
              'logger': logging.getLogger(__name__), 'normalized_score': normalized_score,
-             'unit_score': unit_score, 'weighted_rrf': weighted_rrf}
+             'unit_score': unit_score, 'weighted_rrf': weighted_rrf,
+             'temporal_neighborhood_boost': temporal_neighborhood_boost}
 exec(compile('from __future__ import annotations\n' + ast.unparse(service_node), 'SearchService', 'exec'), namespace)
 
 
@@ -54,10 +57,19 @@ class ManualOCRTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0]['score'], 0.75 / 1.35)
         self.assertAlmostEqual(rows[1]['score'], 0.6 / 1.35)
 
-    def test_blank_uses_regex_and_plain_visual_query_gets_no_boost(self):
-        self.service.apply_ocr_boost(self.rows(), '115', '  ')
-        self.assertEqual(self.service.text_search.keywords, ['115'])
+    def test_blank_skips_auto_regex_by_default_and_can_opt_in(self):
+        self.assertEqual(self.service.apply_ocr_boost(self.rows(), '115', '  '), self.rows())
+        self.assertFalse(self.service.text_search.extracted)
+        self.assertIsNone(self.service.text_search.keywords)
         self.assertEqual(self.service.apply_ocr_boost(self.rows(), 'woman cycling'), self.rows())
+        namespace['config'].AUTO_OCR_EXTRACTION = True
+        try:
+            rows = self.service.apply_ocr_boost(self.rows(), '115', '  ')
+            self.assertTrue(self.service.text_search.extracted)
+            self.assertEqual(self.service.text_search.keywords, ['115'])
+            self.assertEqual([r['keyframe_name'] for r in rows], ['002', '001'])
+        finally:
+            namespace['config'].AUTO_OCR_EXTRACTION = False
 
     def test_missing_ocr_store_keeps_visual_results(self):
         self.service.text_search = None

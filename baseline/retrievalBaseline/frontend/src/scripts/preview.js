@@ -343,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
   previewFrame.addEventListener('dblclick', (e) => {
     if (e.target.tagName === 'IMG') {
       const isLeftPreview = e.target.closest('.preview-container').classList.contains('left-preview');
-      showFullscreenImage(e.target.src, isLeftPreview);
+      showFullscreenImage(e.target.dataset.src || e.target.src, isLeftPreview);
     }
   });
 

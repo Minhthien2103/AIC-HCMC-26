@@ -44,3 +44,41 @@ def weighted_rrf(rankings, weights, rank_constant=60):
             # Divide by the theoretical maximum, not the observed batch maximum.
             fused[key]['score'] += (weight / total) * (rank_constant + 1) / (rank_constant + rank)
     return sorted(fused.values(), key=lambda c: -c['score'])
+
+
+def temporal_neighborhood_boost(candidates, window_seconds=6.0, neighbor_weight=0.25, max_neighbors=2):
+    """Promote frames supported by nearby high-scoring frames in the same video."""
+    if (not candidates or not math.isfinite(window_seconds) or window_seconds <= 0
+            or not math.isfinite(neighbor_weight) or neighbor_weight <= 0 or max_neighbors < 1):
+        return candidates
+
+    items = [dict(c, score=normalized_score(c), score_space='unit') for c in candidates]
+    by_video = {}
+    for idx, item in enumerate(items):
+        vid = str(item.get('video_id') or '').strip()
+        try:
+            stamp = float(item.get('pts_time'))
+        except (TypeError, ValueError):
+            continue
+        if vid and math.isfinite(stamp):
+            by_video.setdefault(vid, []).append((idx, stamp, item['score']))
+
+    neighborhoods = [0.0] * len(items)
+    for group in by_video.values():
+        if len(group) < 2:
+            continue
+        for idx, stamp, _base in group:
+            supports = []
+            for other_idx, other_stamp, other_score in group:
+                if other_idx == idx:
+                    continue
+                delta = abs(other_stamp - stamp)
+                if delta <= window_seconds:
+                    supports.append(other_score * (1.0 - delta / window_seconds))
+            if supports:
+                supports.sort(reverse=True)
+                neighborhoods[idx] = sum(supports[:max_neighbors]) / max_neighbors
+
+    for item, neighborhood in zip(items, neighborhoods):
+        item['score'] = unit_score((item['score'] + neighbor_weight * neighborhood) / (1.0 + neighbor_weight))
+    return [item for _, item in sorted(enumerate(items), key=lambda pair: (-pair[1]['score'], pair[0]))]

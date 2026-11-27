@@ -65,6 +65,17 @@ class QueryPreparationTests(unittest.TestCase):
         with self.assertRaises(QueryPreparationError):
             split_for_encoder("abcdefgh", len, 3)
 
+    def test_split_prefers_sentence_and_clause_boundaries(self):
+        text = "A woman in yellow stands left of a white ambulance. She hands a red hat to a boy, not the man behind."
+        count_tokens = lambda value: len(value.split()) + 2
+        chunks = split_for_encoder(text, count_tokens, 12)
+        self.assertEqual(chunks, [
+            "A woman in yellow stands left of a white ambulance.",
+            "She hands a red hat to a boy,",
+            "not the man behind.",
+        ])
+        self.assertTrue(all(count_tokens(c) <= 12 for c in chunks))
+
     def test_token_counter_uses_unpadded_untruncated_encoding(self):
         tree = ast.parse((Path(__file__).resolve().parents[1] / 'src/online_pipeline/query_encoder.py').read_text())
         node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'text_token_count')

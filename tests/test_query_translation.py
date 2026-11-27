@@ -25,6 +25,10 @@ class TranslationTests(unittest.TestCase):
 
     def test_primary_is_immutable_and_invalid_paraphrases_are_rejected(self):
         primary = 'A white lion-dance costume'
+        prompt = expansion_messages(primary)[0]['content']
+        self.assertIn('SigLIP', prompt)
+        self.assertIn('paraphrase1', prompt)
+        self.assertIn('paraphrase2', prompt)
         self.assertEqual(parse_expansions('["variant1", "variant2"]', primary)[0], primary)
         self.assertEqual(parse_expansions('{"paraphrase1":"one","paraphrase2":"two"}', primary),
                          [primary, 'one', 'two'])

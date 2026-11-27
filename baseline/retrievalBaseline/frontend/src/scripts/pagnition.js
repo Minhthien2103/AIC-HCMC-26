@@ -126,13 +126,20 @@ function createPagnitionImageDiv(result, index) {
     const div = document.createElement('div');
     div.className = 'img-dis';
     div.innerHTML = `
-        <img alt="" class="result" loading="lazy" height="100px" id="${index}" data-src="${imgUrl}" src="${imgUrl}">
+        <img alt="" class="result" loading="lazy" height="100px" id="${index}" data-src="${imgUrl}" src="${resultThumbnailUrl(imgUrl)}">
         <div class="infor" title="Click trái: xem video | Chuột phải: xem timeline">${frameInfo}</div>
         <div name="similarity_search" class="similarity_search similarity-search-badge" title="Tìm ảnh tương đồng (Similarity Search)">⚡ Tương đồng</div>
         <div class="export_icon pin-export-badge" title="Ghim để nộp (Export / Submit)">📌 Ghim</div>
+        <button type="button" class="direct-submit-badge" title="Nộp ngay frame này lên DRES">🚀 Nộp</button>
     `;
 
     const img = div.querySelector('img');
+    enableThumbnailFallback(img, imgUrl);
+    const directSubmit = div.querySelector('.direct-submit-badge');
+    directSubmit.addEventListener('click', event => {
+        event.stopPropagation();
+        submitFrameDirect(img, directSubmit);
+    });
     img.resultEntity = result.entity;
     registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
     img.setAttribute('draggable', 'true');

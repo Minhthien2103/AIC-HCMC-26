@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import config
-from src.online_pipeline.score_fusion import weighted_rrf, normalized_score
+from src.online_pipeline.score_fusion import weighted_rrf, normalized_score, temporal_neighborhood_boost
 from src.online_pipeline.query_encoder import QueryEncoder
 from src.online_pipeline.query_expander import QueryExpander
 from src.online_pipeline.query_preparation import QueryPreparationError, prepare_english, prepare_chunks
@@ -288,8 +288,10 @@ class SearchService:
             ocr_kws = list(dict.fromkeys(
                 part.strip().casefold() for part in manual_text.split(",") if part.strip()
             ))
-        else:
+        elif getattr(config, "AUTO_OCR_EXTRACTION", False):
             ocr_kws = self.text_search.extract_deterministic_keywords(query)
+        else:
+            ocr_kws = []
         if not ocr_kws:
             return candidates
 
@@ -314,6 +316,18 @@ class SearchService:
 
         return candidates
 
+    def _retrieve_single_query(self, query: str, top_k: int = 1000, ocr_text: str = "") -> List[Dict[str, Any]]:
+        """Retrieve single-query candidates with bounded temporal neighborhood support and optional OCR."""
+        candidates = self.retrieve_text(query, top_k=top_k)
+        candidates = temporal_neighborhood_boost(
+            candidates,
+            window_seconds=getattr(config, "TEMPORAL_NEIGHBOR_WINDOW", 6.0),
+            neighbor_weight=getattr(config, "TEMPORAL_NEIGHBOR_WEIGHT", 0.25),
+            max_neighbors=getattr(config, "TEMPORAL_NEIGHBOR_MAX_COUNT", 2),
+        )
+        candidates = self.apply_ocr_boost(candidates, query, ocr_text)
+        return self.format_results(candidates, limit=top_k)
+
     def process_temporal_query(
         self,
         first_query: str,
@@ -323,9 +337,7 @@ class SearchService:
     ) -> List[Dict[str, Any]]:
         """Execute single or sequential temporal search with proximity boosting."""
         if not second_query.strip():
-            candidates = self.retrieve_text(first_query, top_k=top_k)
-            candidates = self.apply_ocr_boost(candidates, first_query, ocr_text)
-            return self.format_results(candidates, limit=top_k)
+            return self._retrieve_single_query(first_query, top_k=top_k, ocr_text=ocr_text)
 
         # Temporal Query: expand and encode both events
         r1 = self.retrieve_text(first_query, top_k=max(top_k * 2, 2000))
@@ -378,9 +390,7 @@ class SearchService:
             return []
 
         if len(clean_queries) == 1:
-            candidates = self.retrieve_text(clean_queries[0], top_k=top_k)
-            candidates = self.apply_ocr_boost(candidates, clean_queries[0], ocr_text)
-            return self.format_results(candidates, limit=top_k)
+            return self._retrieve_single_query(clean_queries[0], top_k=top_k, ocr_text=ocr_text)
 
         if len(clean_queries) == 2:
             return self.process_temporal_query(clean_queries[0], clean_queries[1], top_k=top_k, ocr_text=ocr_text)

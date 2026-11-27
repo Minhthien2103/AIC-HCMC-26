@@ -1,9 +1,13 @@
 """Auditable query preparation without GPU dependencies."""
 import logging
+import re
 
 from src.utils.translation import translate_vi_to_en
 
 logger = logging.getLogger(__name__)
+
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?:\n+|(?<=[.!?])\s+)")
+_CLAUSE_BOUNDARY_RE = re.compile(r"(?<=[,;:])\s+|(?<=[–—])\s+")
 
 
 class QueryPreparationError(ValueError):
@@ -37,18 +41,42 @@ def prepare_english(query, expander):
     return {"input": query, "source": source, "english": variants, "warnings": []}
 
 
-def split_for_encoder(text, count_tokens, limit):
-    """Preserve every word, including the last constraint, without truncation."""
-    if count_tokens(text) <= limit:
-        return [text]
+def _split_oversized_piece(piece, count_tokens, limit):
+    if count_tokens(piece) <= limit:
+        return [piece]
+    clauses = [part.strip() for part in _CLAUSE_BOUNDARY_RE.split(piece) if part.strip()]
+    if len(clauses) > 1:
+        return [sub for clause in clauses for sub in _split_oversized_piece(clause, count_tokens, limit)]
     chunks, current = [], ""
-    for word in text.split():
+    for word in piece.split():
         if count_tokens(word) > limit:
             raise QueryPreparationError("Một từ trong truy vấn vượt giới hạn model. Hãy rút gọn từ đó.")
         candidate = f"{current} {word}".strip()
         if current and count_tokens(candidate) > limit:
             chunks.append(current)
             current = word
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def split_for_encoder(text, count_tokens, limit):
+    """Preserve every word and keep sentence/clause boundaries intact without truncation."""
+    normalized = " ".join(text.split())
+    if not normalized:
+        return []
+    if count_tokens(normalized) <= limit:
+        return [normalized]
+    sentences = [part.strip() for part in _SENTENCE_BOUNDARY_RE.split(normalized) if part.strip()]
+    atomic = [piece for sentence in sentences for piece in _split_oversized_piece(sentence, count_tokens, limit)]
+    chunks, current = [], ""
+    for piece in atomic:
+        candidate = f"{current} {piece}".strip()
+        if current and count_tokens(candidate) > limit:
+            chunks.append(current)
+            current = piece
         else:
             current = candidate
     if current:

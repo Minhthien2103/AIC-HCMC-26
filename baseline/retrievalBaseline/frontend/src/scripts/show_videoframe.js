@@ -46,7 +46,7 @@ async function showVideoFrames(imgDiv) {
   // Get the image from the clicked div
   const img = imgDiv.querySelector('img');
   if (img) {
-    const imgPath = img.src;
+    const imgPath = img.dataset.src || img.src;
     const infoDiv = imgDiv.querySelector('.infor');
     const imageInfo = infoDiv.textContent;
     

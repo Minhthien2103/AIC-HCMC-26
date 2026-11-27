@@ -12,7 +12,8 @@ const imageObserver = new IntersectionObserver((entries, observer) => {
       if (entry.isIntersecting) {
           const img = entry.target;
           if (img.dataset.src && (!img.src || img.src === window.location.href)) {
-              img.src = img.dataset.src;
+              img.src = resultThumbnailUrl(img.dataset.src);
+              if (img.frameData) registerFrameMetadata(img, img.frameData);
           }
           observer.unobserve(img);
       }
@@ -41,6 +42,19 @@ function resolveResultImageUrl(result) {
   return `${mediaBase}/keyframes/${video}/${frame}${ext}`;
 }
 
+function resultThumbnailUrl(original) {
+  const url = new URL(original, window.location.href);
+  const media = new URL(window.CONFIG?.MEDIA_BASE || window.MEDIA_BASE || 'http://localhost:8007');
+  if (url.origin === media.origin) url.searchParams.set('thumb', '1');
+  return url.href;
+}
+
+function enableThumbnailFallback(img, original) {
+  img.addEventListener('error', () => {
+    if (img.src !== new URL(original, window.location.href).href) img.src = original;
+  });
+}
+
 function escapeResultHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -64,13 +78,20 @@ function createImageDiv(result, index) {
   div.innerHTML = `
     ${ocrBadge}
     ${vlmBadge}
-    <img alt="" class="result" loading="lazy" height="100px" id="${index}" data-src="${imgUrl}" src="${imgUrl}">
+    <img alt="" class="result" decoding="async" height="100px" id="${index}" data-src="${imgUrl}">
     <div class="infor" title="Click trái: xem video | Chuột phải: xem timeline">${frameInfo}</div>
     <div name="similarity_search" class="similarity_search similarity-search-badge" title="Tìm ảnh tương đồng (Similarity Search)">⚡ Tương đồng</div>
     <div class="export_icon pin-export-badge" title="Ghim để nộp (Export / Submit)">📌 Ghim</div>
+    <button type="button" class="direct-submit-badge" title="Nộp ngay frame này lên DRES">🚀 Nộp</button>
   `;
 
   const img = div.querySelector('img');
+  enableThumbnailFallback(img, imgUrl);
+  const directSubmit = div.querySelector('.direct-submit-badge');
+  directSubmit.addEventListener('click', event => {
+    event.stopPropagation();
+    submitFrameDirect(img, directSubmit);
+  });
   img.resultEntity = result.entity;
   registerFrameMetadata(img, frameFromResult(result.entity, imgUrl));
   img.setAttribute('draggable', 'true');
@@ -140,6 +161,7 @@ function groupResultsByVideo(results) {
 // Update the new right panel
 function updateRightPanel_rows(results) {
   const imagesRows = document.getElementById('images-rows');
+  imagesRows.querySelectorAll('img').forEach(img => imageObserver.unobserve(img));
   imagesRows.innerHTML = ''; // Clear existing content
 
   const videoGroups = groupResultsByVideo(results);
@@ -163,6 +185,7 @@ function updateRightPanel_rows(results) {
           const originalIndex = results.findIndex(r => r.id === result.id);
           const imgDiv = createImageDiv(result, originalIndex + 1);
           resultFragment.appendChild(imgDiv);
+          imageObserver.observe(imgDiv.querySelector('img'));
       });
 
       videoSection.appendChild(resultFragment);

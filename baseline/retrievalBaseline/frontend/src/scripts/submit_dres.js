@@ -315,14 +315,14 @@ function handleDresSaveConfig() {
 // Core Submission Function (submit_to_dres_v2)
 // ------------------------------------------------------------------------------
 
-async function submit_to_dres_v2() {
+async function submit_to_dres_v2(directFrame = null) {
     if (isSubmitting) {
         showTemporaryAlert("⏳ Bài nộp trước đang được gửi, vui lòng chờ...", "warning");
         return;
     }
 
     // 1. Kiểm tra danh sách ảnh đã ghim trong Export Area
-    if (typeof exportedImages === 'undefined' || !exportedImages || exportedImages.length === 0) {
+    if (!directFrame && (typeof exportedImages === 'undefined' || !exportedImages || exportedImages.length === 0)) {
         showTemporaryAlert("⚠️ Bạn chưa ghim frame nào! Hãy bấm '📌 Ghim' trên kết quả tìm kiếm trước.", "warning");
         alert("⚠️ BẠN CHƯA GHIM FRAME NÀO ĐỂ NỘP!\n\nCách thực hiện:\n1. Tìm kiếm và chọn kết quả video/frame ưng ý.\n2. Rê chuột vào ảnh và bấm chữ '📌 Ghim' để đưa frame vào khung Export Area (bên phải).\n3. Bấm lại nút 'Submit DRES' để nộp ngay.");
         return;
@@ -346,7 +346,7 @@ async function submit_to_dres_v2() {
     }
 
     // 3. Trích xuất thông tin frame đầu tiên trong Export Area
-    const firstItem = exportedImages[0];
+    const firstItem = directFrame || exportedImages[0];
     console.log("[DRES] Frame to submit from Export Area:", firstItem);
 
     let selectedFrame;
@@ -365,6 +365,16 @@ async function submit_to_dres_v2() {
     }
 
     let body = {};
+
+    if (directFrame && currentTask === 'trake') {
+        showTemporaryAlert('TRAKE cần ghim chuỗi frame rồi nộp trong Export Area.', 'warning');
+        return;
+    }
+    if (directFrame && ['qa', 'vqa', 'kis-qa'].includes(currentTask)) {
+        const answer = prompt('Nhập đáp án KIS-QA (chỉ chữ số):', vqaInputs[selectedFrame.key] || '');
+        if (answer === null) return;
+        vqaInputs[selectedFrame.key] = answer;
+    }
 
     if (['kis', 'kis-v', 'qa', 'vqa', 'kis-qa'].includes(currentTask)) {
         try {
@@ -499,6 +509,18 @@ async function submit_to_dres_v2() {
 }
 
 window.submit_to_dres_v2 = submit_to_dres_v2;
+
+async function submitFrameDirect(img, button) {
+    if (button.disabled || isSubmitting) return;
+    button.disabled = true;
+    try {
+        await submit_to_dres_v2(frameFromImage(img));
+    } catch (error) {
+        showTemporaryAlert(error.message, 'warning');
+    } finally {
+        button.disabled = false;
+    }
+}
 
 // ------------------------------------------------------------------------------
 // DOM Initialization & Event Binding

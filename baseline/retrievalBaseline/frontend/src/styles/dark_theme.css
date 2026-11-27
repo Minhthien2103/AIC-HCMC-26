@@ -533,7 +533,8 @@ textarea[name="Text_Query"]:focus {
 .pin-export-badge {
   position: absolute;
   top: 4px;
-  right: 4px;
+  left: 4px;
+  right: auto;
   background-color: rgba(30, 41, 59, 0.9);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.4);
@@ -549,6 +550,35 @@ textarea[name="Text_Query"]:focus {
   transition: all 0.2s ease;
   z-index: 5;
 }
+
+.img-dis .direct-submit-badge {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 12;
+  border: 1px solid #34d399;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #065f46;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  align-items: center;
+  gap: 3px;
+}
+.img-dis:hover .direct-submit-badge,
+.img-dis .direct-submit-badge:focus-visible {
+  display: flex;
+}
+.img-dis .direct-submit-badge:hover {
+  background-color: #059669;
+  border-color: #6ee7b7;
+}
+.img-dis .direct-submit-badge:disabled { opacity: 0.5; cursor: wait; }
+.img-dis .pin-export-badge { z-index: 12; }
+.img-dis .ocr-match-badge, .img-dis .vlm-score-badge { top: 32px !important; }
 
 .pin-export-badge:hover {
   background-color: #0284c7;
